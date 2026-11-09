@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.user.dockmiddlequit</string>
+    <key>CFBundleName</key>
+    <string>DockMiddleQuit</string>
+    <key>CFBundleDisplayName</key>
+    <string>DockMiddleQuit - Middle Click to Quit</string>
+    <key>CFBundleVersion</key>
+    <string>2.1</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleExecutable</key>
+    <string>DockMiddleQuit</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Needed to quit apps via AppleScript.</string>
+    <key>NSAccessibilityUsageDescription</key>
+    <string>Needed to detect Dock icon under cursor.</string>
+</dict>
+</plist>

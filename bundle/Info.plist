@@ -7,18 +7,26 @@
     <key>CFBundleName</key>
     <string>DockMiddleQuit</string>
     <key>CFBundleDisplayName</key>
-    <string>DockMiddleQuit - Middle Click to Quit</string>
+    <string>DockMiddleQuit</string>
+    <key>CFBundleShortVersionString</key>
+    <string>2.2</string>
     <key>CFBundleVersion</key>
-    <string>2.1</string>
+    <string>2.2</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleExecutable</key>
     <string>DockMiddleQuit</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
     <key>LSUIElement</key>
+    <true/>
+    <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSAppleEventsUsageDescription</key>
     <string>Needed to quit apps via AppleScript.</string>
     <key>NSAccessibilityUsageDescription</key>
-    <string>Needed to detect Dock icon under cursor.</string>
+    <string>Needed to detect the Dock icon under the cursor.</string>
 </dict>
 </plist>

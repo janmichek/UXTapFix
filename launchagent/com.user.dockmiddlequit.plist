@@ -6,17 +6,21 @@
     <string>com.user.dockmiddlequit</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/yeahboi/Applications/DockMiddleQuit.app/Contents/MacOS/DockMiddleQuit</string>
+        <string>__APP_BINARY__</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
-    <key>StandardOutPath</key>
-    <string>/tmp/dock-middle-quit.log</string>
-    <key>StandardErrorPath</key>
-    <string>/tmp/dock-middle-quit.log</string>
+    <key>LimitLoadToSessionType</key>
+    <string>Aqua</string>
+    <key>ThrottleInterval</key>
+    <integer>3</integer>
     <key>ProcessType</key>
     <string>Interactive</string>
+    <key>StandardOutPath</key>
+    <string>__LOG_PATH__</string>
+    <key>StandardErrorPath</key>
+    <string>__LOG_PATH__</string>
 </dict>
 </plist>

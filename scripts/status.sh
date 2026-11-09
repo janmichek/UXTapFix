@@ -1,20 +1,50 @@
 #!/bin/zsh
+# Print DockMiddleQuit service, permission, and log status.
+set -u
+
+APP="$HOME/Applications/DockMiddleQuit.app"
+BIN="$APP/Contents/MacOS/DockMiddleQuit"
+SUPPORT="$HOME/Library/Application Support/DockMiddleQuit"
+LOG="$HOME/Library/Logs/DockMiddleQuit.log"
+PLIST="$HOME/Library/LaunchAgents/com.user.dockmiddlequit.plist"
+DOMAIN="gui/$(id -u)"
+LABEL="com.user.dockmiddlequit"
+
 echo "=== DockMiddleQuit status ==="
-echo "App bundle: $HOME/Applications/DockMiddleQuit.app"
-ls -lh "$HOME/Applications/DockMiddleQuit.app/Contents/MacOS/DockMiddleQuit" 2>&1 | head
+if [[ -d "$APP" ]]; then
+    echo "App:         $APP"
+    echo "Version:     $(defaults read "$APP/Contents/Info" CFBundleShortVersionString 2>/dev/null || echo unknown)"
+    ls -lh "$BIN" 2>&1 | sed 's/^/             /'
+else
+    echo "App:         not installed at $APP"
+fi
+
 echo ""
-echo "LaunchAgent: ~/Library/LaunchAgents/com.user.dockmiddlequit.plist"
-launchctl print gui/$(id -u)/com.user.dockmiddlequit 2>&1 | head -n 50
+echo "Login item:  $PLIST"
+if [[ -f "$PLIST" ]]; then
+    echo "             present"
+else
+    echo "             missing (launch at login is off)"
+fi
+
 echo ""
-echo "Process:"
-ps aux | grep -E "DockMiddleQuit|dock-middle" | grep -v grep 2>&1 | head
+echo "Service:"
+launchctl print "$DOMAIN/$LABEL" 2>&1 | head -n 40
+
 echo ""
-echo "Log (last 30 lines):"
-cat /tmp/dock-middle-quit.log 2>&1 | tail -n 30
+echo "Status file: $SUPPORT/status.json"
+echo "(permissions here are reported by the running daemon itself)"
+if [[ -f "$SUPPORT/status.json" ]]; then
+    cat "$SUPPORT/status.json"
+else
+    echo "  missing (the service has not written it yet)"
+fi
+
+echo ""
+echo "Log (last 30 lines): $LOG"
+tail -n 30 "$LOG" 2>&1
+
 echo ""
 echo "MiddleClick config:"
 defaults read art.ginzburg.MiddleClick 2>&1 | head -n 20
 defaults read com.knollsoft.Middle 2>&1 | head -n 20
-echo ""
-echo "Dock autohide:"
-defaults read com.apple.dock autohide 2>&1 | head

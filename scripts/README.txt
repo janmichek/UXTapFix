@@ -1,50 +1,68 @@
-DockMiddleQuit - middle-click (or 3-finger tap) on Dock icon to quit app
-=========================================================================
+DockMiddleQuit helper scripts
+=============================
 
-Installed:
-  App: ~/Applications/DockMiddleQuit.app  (LSUIElement, no Dock icon)
-  Binary also at ~/.local/bin/dock-middle-quit
-  LaunchAgent: ~/Library/LaunchAgents/com.user.dockmiddlequit.plist  (RunAtLoad + KeepAlive)
-  Log: /tmp/dock-middle-quit.log
-  Swift source: ~/Library/Application Support/DockMiddleQuit/DockMiddleQuit.swift
+The main way to install, repair permissions, and uninstall is the guided app:
 
-How it works:
-  - Listens for otherMouseDown button 2 (middle click)
-    * physical middle mouse button
-    * 3-finger tap (via MiddleClick.app which maps 3-finger tap -> middle click)
-      MiddleClick.app is already installed on this Mac (art.ginzburg.MiddleClick 3.1.3)
-  - Uses Accessibility API to find which Dock icon is under cursor (AXDockItem)
-  - Quits that app via NSRunningApplication.terminate() or AppleScript
+  ~/Applications/DockMiddleQuit Setup.app
 
-Blocked icons (won't quit): Trash, Launchpad, Mission Control, Finder
-  Finder is blocked because quitting it just relaunches; run enable-finder-quit.sh to allow.
+These scripts are for terminal users and troubleshooting. They are copied to:
 
-Required permissions (manual, due to macOS TCC):
+  ~/Library/Application Support/DockMiddleQuit/
+
+Installed locations
+-------------------
+  App:         ~/Applications/DockMiddleQuit.app
+  Login item:  ~/Library/LaunchAgents/com.user.dockmiddlequit.plist
+  Log:         ~/Library/Logs/DockMiddleQuit.log
+  Live status: ~/Library/Application Support/DockMiddleQuit/status.json
+  Source:      ~/Library/Application Support/DockMiddleQuit/DockMiddleQuit.swift
+
+Scripts
+-------
+  status.sh
+      Shows the app version, launchd state, live permission check, status file,
+      log tail, and MiddleClick configuration.
+
+  restart.sh
+      Restarts the LaunchAgent and prints the newest log lines.
+
+  uninstall.sh
+      Stops the service and removes the app, Setup app, login item, helper
+      files, log, and privacy records. Add --yes to skip the confirmation.
+
+  enable-finder-quit.sh
+      Advanced: rebuilds the daemon with Finder removed from the blacklist.
+      Finder normally reopens instantly, so this is off by default. The rebuild
+      changes the ad-hoc signature, so Accessibility must be approved again.
+      Reinstalling from Setup restores the normal build.
+
+Permissions (manual, by macOS design)
+-------------------------------------
   1. System Settings -> Privacy & Security -> Accessibility
-     Click + -> Add -> ~/Applications/DockMiddleQuit.app (or ~/.local/bin/dock-middle-quit)
-     Enable the toggle.
+     Enable DockMiddleQuit.
   2. System Settings -> Privacy & Security -> Input Monitoring
-     Same: Add DockMiddleQuit.app and enable.
-     (If using fallback NSEvent monitor, Input Monitoring may still be needed on macOS 15+.)
+     Enable DockMiddleQuit (recommended; makes quitting smoother).
 
-After granting, restart daemon:
-  ~/Library/Application\ Support/DockMiddleQuit/restart.sh
-  or: launchctl kickstart -k gui/$(id -u)/com.user.dockmiddlequit
+  If a switch already looks on but status still shows false, the entry belongs
+  to an older build. In Setup, click Reset on that permission card, then Grant
+  Access again. The equivalent terminal command is:
 
-Verify:
-  tail -f /tmp/dock-middle-quit.log
-  Then middle-click (or 3-finger tap) a Dock icon (e.g., TextEdit, Calculator).
-  Log should show: "middle-click on 'TextEdit' at (x,y) -> quitting"
-  Status script: ~/Library/Application\ Support/DockMiddleQuit/status.sh
+    tccutil reset Accessibility com.user.dockmiddlequit
+    tccutil reset ListenEvent com.user.dockmiddlequit
 
-Three-finger setup:
-  MiddleClick.app already maps 3-finger tap -> middle click (trackpadThreeTap=1).
-  To also map 3-finger *click* (press), run:
-    defaults write art.ginzburg.MiddleClick trackpadThreeClick -bool true
-    killall MiddleClick; open -a MiddleClick
+Launch at login
+---------------
+  The Setup app writes a per-user LaunchAgent with RunAtLoad + KeepAlive.
+  Turning "Launch at login" off removes the plist and stops the service.
+  To restart it manually:
 
-Uninstall:
-  ~/Library/Application\ Support/DockMiddleQuit/uninstall.sh
+    launchctl kickstart -k gui/$(id -u)/com.user.dockmiddlequit
 
-Note: If daemon shows "Accessibility NOT granted" or "CGEventTap failed" in log,
-      you still need to add it to Accessibility/Input Monitoring as above.
+Three-finger tap
+----------------
+  DockMiddleQuit reacts to a middle click. The free MiddleClick app maps a
+  three-finger tap to a middle click:
+
+    https://github.com/artginzburg/MiddleClick
+
+  The Setup app detects MiddleClick and offers to open it.

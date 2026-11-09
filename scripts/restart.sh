@@ -1,4 +1,13 @@
 #!/bin/zsh
-launchctl kickstart -k gui/$(id -u)/com.user.dockmiddlequit 2>&1
+# Restart the DockMiddleQuit launchd service and show the newest log lines.
+set -u
+
+LOG="$HOME/Library/Logs/DockMiddleQuit.log"
+DOMAIN="gui/$(id -u)"
+LABEL="com.user.dockmiddlequit"
+
+launchctl kickstart -k "$DOMAIN/$LABEL" 2>&1
 sleep 1
-cat /tmp/dock-middle-quit.log | tail -n 20
+echo ""
+echo "--- $LOG ---"
+tail -n 20 "$LOG" 2>&1

@@ -1,18 +1,145 @@
-// DockMiddleQuit v2 - supports both CGEventTap (swallow) and NSEvent global monitor (fallback)
-// No Input Monitoring required if using NSEvent path (just Accessibility)
-// middle-click (button 2) == 3-finger tap if MiddleClick.app maps it
+// DockMiddleQuit v2.2
+// Middle-click (button 2) a Dock icon to quit that app.
+// Supports CGEventTap (swallows the click) with an NSEvent global monitor fallback.
+//
+// The Setup app asks this binary to request TCC permissions and reads status.json
+// to show live permission / health information.
 import Cocoa
 import ApplicationServices
+import CoreGraphics
 import Darwin
+import ServiceManagement
 setlinebuf(stdout)
 
+let appVersion = "2.2"
+let supportDirectory = FileManager.default.homeDirectoryForCurrentUser
+    .appendingPathComponent("Library/Application Support/DockMiddleQuit", isDirectory: true)
+let statusFileURL = supportDirectory.appendingPathComponent("status.json")
+let logFileURL = FileManager.default.homeDirectoryForCurrentUser
+    .appendingPathComponent("Library/Logs/DockMiddleQuit.log")
+
+let startedAt = Date().timeIntervalSince1970
+var lastQuitName: String?
+var lastQuitAt: TimeInterval?
+var statusTimer: Timer?
+var reportedStatusWriteFailure = false
+
+// MARK: - Permission helpers
+
+func accessibilityGranted() -> Bool {
+    AXIsProcessTrusted()
+}
+
+func inputMonitoringGranted() -> Bool {
+    CGPreflightListenEventAccess()
+}
+
+func printJSON(_ object: [String: Any]) {
+    guard let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
+          let text = String(data: data, encoding: .utf8) else { return }
+    print(text)
+}
+
+// MARK: - Status reporting (read by the Setup app)
+
+func writeStatus() {
+    var payload: [String: Any] = [
+        "version": appVersion,
+        "pid": Int(getpid()),
+        "accessibility": accessibilityGranted(),
+        "inputMonitoring": inputMonitoringGranted(),
+        "eventTapActive": eventTap != nil,
+        "startedAt": startedAt,
+        "updatedAt": Date().timeIntervalSince1970
+    ]
+    if let lastQuitName { payload["lastQuitApp"] = lastQuitName }
+    if let lastQuitAt { payload["lastQuitAt"] = lastQuitAt }
+
+    do {
+        try FileManager.default.createDirectory(at: supportDirectory, withIntermediateDirectories: true)
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        try data.write(to: statusFileURL, options: .atomic)
+        reportedStatusWriteFailure = false
+    } catch {
+        if !reportedStatusWriteFailure {
+            reportedStatusWriteFailure = true
+            print("[DockMiddleQuit] Could not write status file: \(error.localizedDescription)")
+        }
+    }
+}
+
+func startStatusHeartbeat() {
+    writeStatus()
+    statusTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
+        writeStatus()
+    }
+}
+
+// MARK: - CLI modes used by the Setup app
+// Keep these before any event-tap setup so another app instance can request a
+// permission prompt without becoming a second background service.
+
+if CommandLine.arguments.contains("--version") {
+    print(appVersion)
+    exit(0)
+}
+
+if CommandLine.arguments.contains("--check") {
+    printJSON([
+        "version": appVersion,
+        "accessibility": accessibilityGranted(),
+        "inputMonitoring": inputMonitoringGranted()
+    ])
+    exit(0)
+}
+
+if CommandLine.arguments.contains("--request-accessibility") {
+    print("[DockMiddleQuit] Requesting Accessibility access…")
+    let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+    let alreadyGranted = AXIsProcessTrustedWithOptions(options)
+    print(alreadyGranted
+          ? "[DockMiddleQuit] Accessibility already granted ✓"
+          : "[DockMiddleQuit] Waiting for Accessibility approval…")
+    // Give the system prompt a moment to remain on screen before this helper exits.
+    RunLoop.main.run(until: Date().addingTimeInterval(alreadyGranted ? 0.2 : 4.0))
+    exit(alreadyGranted ? 0 : 2)
+}
+
+if CommandLine.arguments.contains("--request-input-monitoring") {
+    let alreadyGranted = inputMonitoringGranted()
+    if !alreadyGranted {
+        print("[DockMiddleQuit] Requesting Input Monitoring access…")
+        _ = CGRequestListenEventAccess()
+    }
+    print(inputMonitoringGranted()
+          ? "[DockMiddleQuit] Input Monitoring granted ✓"
+          : "[DockMiddleQuit] Input Monitoring not granted (optional)")
+    RunLoop.main.run(until: Date().addingTimeInterval(1.0))
+    exit(inputMonitoringGranted() ? 0 : 2)
+}
+
+// Older builds could be added with "Open at Login" (a Background Task
+// Management app login item). The new installer uses a LaunchAgent instead.
+// Best-effort cleanup: unregister the main-app login item if it exists. The
+// Setup app also checks BTM and tells the user if anything is left behind.
+if CommandLine.arguments.contains("--unregister-login-item") {
+    do {
+        try SMAppService.mainApp.unregister()
+        print("[DockMiddleQuit] Removed the legacy main-app login item.")
+    } catch {
+        print("[DockMiddleQuit] No legacy main-app login item removed: \(error.localizedDescription)")
+    }
+    exit(0)
+}
+
+// MARK: - Accessibility / Dock lookup
+
 func ensureTrusted() -> Bool {
-    let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-    let trusted = AXIsProcessTrustedWithOptions(opts)
+    let trusted = accessibilityGranted()
     if !trusted {
-        print("[DockMiddleQuit] ⚠️ Accessibility NOT granted. Please add this app/binary to:")
-        print("   System Settings -> Privacy & Security -> Accessibility -> + -> select DockMiddleQuit")
-        print("   Then restart daemon.")
+        print("[DockMiddleQuit] ⚠️ Accessibility NOT granted.")
+        print("   Open DockMiddleQuit Setup and follow the permission steps, or add")
+        print("   \(Bundle.main.bundlePath) in System Settings -> Privacy & Security -> Accessibility.")
     } else {
         print("[DockMiddleQuit] Accessibility trusted ✓")
     }
@@ -23,10 +150,7 @@ func dockAppName(at point: CGPoint) -> String? {
     let sys = AXUIElementCreateSystemWide()
     var el: AXUIElement?
     let err = AXUIElementCopyElementAtPosition(sys, Float(point.x), Float(point.y), &el)
-    guard err == .success, let element = el else {
-        // print("AX err \(err)")
-        return nil
-    }
+    guard err == .success, let element = el else { return nil }
     var role: AnyObject?
     AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
     guard let r = role as? String, r == "AXDockItem" else { return nil }
@@ -40,8 +164,8 @@ func dockAppName(at point: CGPoint) -> String? {
 
 func isBlacklisted(_ name: String) -> Bool {
     let lower = name.lowercased()
-    // Finder relaunches, Trash/Launchpad not apps. Keep Finder in list to avoid accidental quit.
-    // Remove "finder" from set if you DO want middle-click to quit Finder.
+    // Finder relaunches; Trash/Launchpad/Mission Control are not normal apps.
+    // Run scripts/enable-finder-quit.sh if you want middle-click to quit Finder.
     return ["trash", "launchpad", "mission control", "finder"].contains(lower)
 }
 
@@ -53,6 +177,9 @@ func quitApp(named name: String) {
     let apps = NSWorkspace.shared.runningApplications
     if let app = apps.first(where: { $0.localizedName == name }) {
         print("[DockMiddleQuit] Quitting '\(name)' pid \(app.processIdentifier)")
+        lastQuitName = name
+        lastQuitAt = Date().timeIntervalSince1970
+        writeStatus()
         if !app.terminate() {
             print("[DockMiddleQuit] terminate() false, retry forceTerminate in 1.2s")
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
@@ -62,6 +189,9 @@ func quitApp(named name: String) {
         return
     }
     print("[DockMiddleQuit] No NSRunningApp for '\(name)', trying AppleScript")
+    lastQuitName = name
+    lastQuitAt = Date().timeIntervalSince1970
+    writeStatus()
     let src = "tell application \"\(name)\" to quit"
     var err: NSDictionary?
     if let sc = NSAppleScript(source: src) {
@@ -69,7 +199,6 @@ func quitApp(named name: String) {
         if let e = err { print("[DockMiddleQuit] AppleScript error \(e)") }
         else { print("[DockMiddleQuit] AppleScript quit sent to '\(name)'") }
     }
-    // also try bundle identifier fuzzy
     if let byBundle = apps.first(where: { ($0.bundleIdentifier ?? "").lowercased().contains(name.lowercased()) }) {
         print("[DockMiddleQuit] Fuzzy bundle match \(String(describing: byBundle.bundleIdentifier)) -> terminate")
         _ = byBundle.terminate()
@@ -77,19 +206,19 @@ func quitApp(named name: String) {
 }
 
 // MARK: - Event handling (shared)
+
 func handleMiddleClick(at point: CGPoint) {
     if let name = dockAppName(at: point) {
         print("[DockMiddleQuit] middle-click on '\(name)' at \(point) -> quit")
         quitApp(named: name)
-    } else {
-        // Not on dock - ignore silently (verbose for debug)
-        // print("[DockMiddleQuit] middle-click at \(point) not on dock")
     }
 }
 
 // MARK: - CGEventTap (can swallow)
+
 var eventTap: CFMachPort?
 let middleButton: Int64 = 2
+
 func tapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent, refcon: UnsafeMutableRawPointer?) -> Unmanaged<CGEvent>? {
     if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
         if let t = eventTap { CGEvent.tapEnable(tap: t, enable: true) }
@@ -99,7 +228,6 @@ func tapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent, refc
         let btn = event.getIntegerValueField(.mouseEventButtonNumber)
         if btn == middleButton {
             let loc = event.location
-            // check dock synchronously (must be quick)
             if dockAppName(at: loc) != nil {
                 DispatchQueue.main.async { handleMiddleClick(at: loc) }
                 return nil // swallow
@@ -113,8 +241,15 @@ func tryInstallEventTap() -> Bool {
     let mask: CGEventMask = (1 << CGEventType.otherMouseDown.rawValue)
         | (1 << CGEventType.tapDisabledByTimeout.rawValue)
         | (1 << CGEventType.tapDisabledByUserInput.rawValue)
-    guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap, eventsOfInterest: mask, callback: tapCallback, userInfo: nil) else {
-        print("[DockMiddleQuit] CGEventTap failed (need Input Monitoring). Falling back to NSEvent global monitor.")
+    guard let tap = CGEvent.tapCreate(
+        tap: .cgSessionEventTap,
+        place: .headInsertEventTap,
+        options: .defaultTap,
+        eventsOfInterest: mask,
+        callback: tapCallback,
+        userInfo: nil
+    ) else {
+        print("[DockMiddleQuit] CGEventTap failed (Input Monitoring not granted). Falling back to NSEvent global monitor.")
         return false
     }
     eventTap = tap
@@ -126,8 +261,7 @@ func tryInstallEventTap() -> Bool {
 }
 
 func installGlobalMonitor() {
-    // NSEvent global monitor - passive, does not swallow, but needs only Accessibility (often already granted)
-    // This still works for middle clicks generated by MiddleClick.app (3-finger tap)
+    // Passive fallback. Works with only Accessibility, but the Dock menu may flash.
     NSEvent.addGlobalMonitorForEvents(matching: .otherMouseDown) { e in
         if e.buttonNumber == 2 {
             let pt = NSEvent.mouseLocation
@@ -138,22 +272,29 @@ func installGlobalMonitor() {
 }
 
 // MARK: - Main
-print("[DockMiddleQuit] Starting v2...")
+
+print("[DockMiddleQuit] Starting v\(appVersion)…")
 _ = ensureTrusted()
 
 let tapOK = tryInstallEventTap()
+installGlobalMonitor()
 if !tapOK {
-    installGlobalMonitor()
-    print("[DockMiddleQuit] Using fallback monitor. Middle-click will quit but Dock may flash menu briefly.")
+    print("[DockMiddleQuit] Using fallback monitor. Middle-click still works, but the Dock menu may flash briefly.")
 } else {
-    // also install global as backup in case tap gets disabled
-    installGlobalMonitor()
+    print("[DockMiddleQuit] Input Monitoring \(inputMonitoringGranted() ? "granted ✓" : "not granted")")
 }
 
+startStatusHeartbeat()
 print("[DockMiddleQuit] Ready. Middle-click (or 3-finger tap) any Dock icon to quit. PID \(getpid())")
-print("[DockMiddleQuit] Log: /tmp/dock-middle-quit.log  (tail -f to debug)")
+print("[DockMiddleQuit] Log: \(logFileURL.path)")
 
-signal(SIGTERM) { _ in print("[DockMiddleQuit] SIGTERM"); exit(0) }
-signal(SIGINT) { _ in print("[DockMiddleQuit] SIGINT"); exit(0) }
+signal(SIGTERM) { _ in
+    print("[DockMiddleQuit] SIGTERM")
+    exit(0)
+}
+signal(SIGINT) { _ in
+    print("[DockMiddleQuit] SIGINT")
+    exit(0)
+}
 
 CFRunLoopRun()

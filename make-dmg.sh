@@ -37,8 +37,8 @@ INSTALL
    If macOS says it can't verify the app, right-click it and choose Open.
    That warning appears because this build is ad-hoc signed, not notarized.
 
-2. Follow the short steps:
-   Welcome -> Install -> Access -> Login -> Ready.
+2. Follow the four steps:
+   Welcome -> Permissions -> Launch at Login -> Setup Complete.
 
    No admin password is needed. The app is installed in your user folder:
    ~/Applications/DockMiddleQuit.app
@@ -55,20 +55,34 @@ macOS requires you to approve two switches manually:
 
 The Setup app opens the exact System Settings pane and updates live when the
 switch is on. If a switch already looks on but status stays off, click Reset
-on that permission card, then Grant Access again. This clears an old entry
+on that permission row, then Grant Access again. This clears an old entry
 left behind by a previous build.
 
 THREE-FINGER TAP
 ----------------
-DockMiddleQuit reacts to a middle click. For trackpad users, install the free
-MiddleClick app (https://github.com/artginzburg/MiddleClick) and map
-three-finger tap to middle click. The Setup app detects it for you.
+DockMiddleQuit turns a three-finger trackpad tap (or a physical click with
+three fingers down) into a real middle click:
+
+  Dock icon     -> the app quits
+  Browser tab   -> the tab closes
+  Terminal      -> selected text is pasted
+
+The gesture is built in. You do not need the MiddleClick app anymore. If
+MiddleClick is still running, quit it (or run: brew uninstall --cask
+middleclick) so one gesture does not produce two clicks.
+
+If macOS opens Look Up on a three-finger tap, set System Settings -> Trackpad
+-> Point & Click -> Look up & data detectors to "Force Click with one finger".
+
+The gesture uses Apple's private MultitouchSupport framework. It is not App
+Store compatible and may stop working after a macOS update. The Dock shortcut
+still works with a real middle-click mouse.
 
 UNINSTALL
 ---------
 Reopen "DockMiddleQuit Setup.app" (it is copied to ~/Applications) and use
-the gear menu -> Uninstall. This removes the app, login item, helper files,
-and its privacy permissions.
+the menu in the window toolbar -> Uninstall. This removes the app, login item,
+helper files, and its privacy permissions.
 README
 
 echo ""

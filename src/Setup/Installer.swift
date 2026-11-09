@@ -7,29 +7,16 @@ import Foundation
 
 struct DaemonStatus {
     let version: String?
-    let pid: Int?
     let accessibility: Bool
     let inputMonitoring: Bool
     let eventTapActive: Bool
-    let startedAt: Date?
+    let middleClickEmulation: Bool
+    let middleClickEnabled: Bool
+    let middleClickFingers: Int
     let updatedAt: Date
-    let lastQuitApp: String?
-    let lastQuitAt: Date?
 
     var isFresh: Bool {
         Date().timeIntervalSince(updatedAt) < 8
-    }
-
-    var uptime: TimeInterval? {
-        guard let startedAt, isFresh else { return nil }
-        return Date().timeIntervalSince(startedAt)
-    }
-
-    var lastQuitDescription: String? {
-        guard let lastQuitAt, let lastQuitApp else { return nil }
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .full
-        return "\(lastQuitApp) · \(formatter.localizedString(for: lastQuitAt, relativeTo: Date()))"
     }
 
     static func read(from url: URL) -> DaemonStatus? {
@@ -46,14 +33,13 @@ struct DaemonStatus {
 
         return DaemonStatus(
             version: object["version"] as? String,
-            pid: (object["pid"] as? NSNumber)?.intValue,
             accessibility: (object["accessibility"] as? Bool) ?? false,
             inputMonitoring: (object["inputMonitoring"] as? Bool) ?? false,
             eventTapActive: (object["eventTapActive"] as? Bool) ?? false,
-            startedAt: number("startedAt").map(Date.init(timeIntervalSince1970:)),
-            updatedAt: Date(timeIntervalSince1970: updatedAt),
-            lastQuitApp: object["lastQuitApp"] as? String,
-            lastQuitAt: number("lastQuitAt").map(Date.init(timeIntervalSince1970:))
+            middleClickEmulation: (object["middleClickEmulation"] as? Bool) ?? false,
+            middleClickEnabled: (object["middleClickEnabled"] as? Bool) ?? true,
+            middleClickFingers: (object["middleClickFingers"] as? NSNumber)?.intValue ?? 3,
+            updatedAt: Date(timeIntervalSince1970: updatedAt)
         )
     }
 }
@@ -62,24 +48,11 @@ struct DaemonStatus {
 
 @MainActor
 final class SetupModel: ObservableObject {
-    enum Step: Int, CaseIterable, Identifiable {
+    enum Step {
         case welcome
-        case install
         case permissions
         case login
         case done
-
-        var id: Int { rawValue }
-
-        var label: String {
-            switch self {
-            case .welcome: return "Welcome"
-            case .install: return "Install"
-            case .permissions: return "Access"
-            case .login: return "Login"
-            case .done: return "Ready"
-            }
-        }
     }
 
     enum InstallPhase: Equatable {
@@ -136,6 +109,24 @@ final class SetupModel: ObservableObject {
             case .inputMonitoring: return "ListenEvent"
             }
         }
+
+        var icon: String {
+            switch self {
+            case .accessibility: return "accessibility"
+            case .inputMonitoring: return "keyboard"
+            }
+        }
+
+        var summary: String {
+            switch self {
+            case .accessibility: return "Identify the Dock icon under the pointer."
+            case .inputMonitoring: return "Catch clicks before the Dock menu appears and rewrite three-finger clicks."
+            }
+        }
+
+        var isRequired: Bool {
+            self == .accessibility
+        }
     }
 
     struct InstallerError: LocalizedError {
@@ -147,7 +138,6 @@ final class SetupModel: ObservableObject {
     @Published var installed = false
     @Published var launchAtLogin = false
     @Published var status: DaemonStatus?
-    @Published var lastRefresh = Date()
     @Published var busy = false
     @Published var installPhase: InstallPhase = .idle
     @Published var errorMessage: String?
@@ -155,9 +145,9 @@ final class SetupModel: ObservableObject {
     @Published var requestedPermission: PermissionKind?
     @Published var restartingService = false
     @Published var showUninstallConfirmation = false
-    @Published var didJustInstall = false
     @Published var hadLegacyInstall = false
     @Published var legacyLoginItemPresent = false
+    @Published var middleClickAppRunning = false
 
     private let fileManager = FileManager.default
     private var didBootstrap = false
@@ -167,7 +157,6 @@ final class SetupModel: ObservableObject {
     private var isCheckingLegacyLoginItem = false
 
     let label = "com.user.dockmiddlequit"
-    let setupVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "2.2"
 
     // MARK: Paths
 
@@ -217,37 +206,9 @@ final class SetupModel: ObservableObject {
     var serviceRunning: Bool { status?.isFresh == true }
     var accessibilityGranted: Bool { status?.accessibility == true }
     var inputMonitoringGranted: Bool { status?.inputMonitoring == true }
-    var allRequiredPermissionsGranted: Bool { accessibilityGranted }
-
-    var canContinueFromPermissions: Bool { accessibilityGranted }
-
-    var statusSummary: String {
-        if serviceRunning {
-            return "Background service running"
-        }
-        if installed {
-            return "Background service stopped"
-        }
-        return "Not installed yet"
-    }
-
-    var permissionStatusDetail: String {
-        guard let status else { return "Waiting for the background service to report in." }
-        if !status.isFresh {
-            return "Last checked \(relativeTime(since: status.updatedAt)). The service is not running right now."
-        }
-        return "Checked live from the background service."
-    }
-
-    var lastQuitDescription: String? {
-        status?.lastQuitDescription
-    }
-
-    func relativeTime(since date: Date) -> String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .full
-        return formatter.localizedString(for: date, relativeTo: Date())
-    }
+    var middleClickEmulationActive: Bool { status?.middleClickEmulation == true }
+    var middleClickConfigured: Bool { status?.middleClickEnabled ?? true }
+    var middleClickFingers: Int { status?.middleClickFingers ?? 3 }
 
     // MARK: Lifecycle
 
@@ -274,13 +235,15 @@ final class SetupModel: ObservableObject {
     func refresh() {
         installed = fileManager.fileExists(atPath: appURL.path)
         launchAtLogin = fileManager.fileExists(atPath: launchAgentURL.path)
+        middleClickAppRunning = !NSRunningApplication
+            .runningApplications(withBundleIdentifier: "art.ginzburg.MiddleClick")
+            .isEmpty
         if let newStatus = DaemonStatus.read(from: statusURL) {
             status = newStatus
             detectPermissionChange(in: newStatus)
         } else if !fileManager.fileExists(atPath: statusURL.path) {
             status = nil
         }
-        lastRefresh = Date()
 
         if requestedPermission == .accessibility && accessibilityGranted {
             requestedPermission = nil
@@ -323,8 +286,6 @@ final class SetupModel: ObservableObject {
     func goNext() {
         switch step {
         case .welcome:
-            step = installed ? .permissions : .install
-        case .install:
             step = .permissions
         case .permissions:
             step = .login
@@ -339,10 +300,8 @@ final class SetupModel: ObservableObject {
         switch step {
         case .welcome:
             break
-        case .install:
-            step = .welcome
         case .permissions:
-            step = .install
+            step = .welcome
         case .login:
             step = .permissions
         case .done:
@@ -380,13 +339,12 @@ final class SetupModel: ObservableObject {
             installPhase = .finished
             installed = true
             launchAtLogin = true
-            didJustInstall = true
 
             await unregisterLegacyLoginItemIfNeeded()
             try await Task.sleep(nanoseconds: 650_000_000)
             refresh()
             await waitForFreshStatus(timeout: 5.0)
-            infoMessage = "Installed. Let's get macOS permissions sorted."
+            infoMessage = "DockMiddleQuit is installed. Grant the permissions below."
             step = .permissions
         } catch {
             installPhase = .idle
@@ -494,6 +452,13 @@ final class SetupModel: ObservableObject {
             try? fileManager.copyItem(at: source, to: supportURL.appendingPathComponent("DockMiddleQuit.swift"))
         }
 
+        let headerSource = resources.appendingPathComponent("MultitouchSupport", isDirectory: true)
+        if fileManager.fileExists(atPath: headerSource.path) {
+            let destination = supportURL.appendingPathComponent("MultitouchSupport", isDirectory: true)
+            try? fileManager.removeItem(at: destination)
+            try? fileManager.copyItem(at: headerSource, to: destination)
+        }
+
         let scripts = resources.appendingPathComponent("scripts", isDirectory: true)
         if fileManager.fileExists(atPath: scripts.path) {
             let contents = (try? fileManager.contentsOfDirectory(at: scripts, includingPropertiesForKeys: nil)) ?? []
@@ -578,6 +543,22 @@ final class SetupModel: ObservableObject {
             if infoMessage == "Background service restarted." {
                 infoMessage = nil
             }
+        }
+    }
+
+    func quitMiddleClick() {
+        let running = NSRunningApplication.runningApplications(withBundleIdentifier: "art.ginzburg.MiddleClick")
+        guard !running.isEmpty else {
+            middleClickAppRunning = false
+            return
+        }
+        for app in running {
+            _ = app.terminate()
+        }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            refresh()
+            infoMessage = "MiddleClick quit. DockMiddleQuit now handles the three-finger gesture."
         }
     }
 
@@ -693,42 +674,6 @@ final class SetupModel: ObservableObject {
     func revealApp() {
         guard fileManager.fileExists(atPath: appURL.path) else { return }
         NSWorkspace.shared.activateFileViewerSelecting([appURL])
-    }
-
-    func revealSetupApp() {
-        NSWorkspace.shared.activateFileViewerSelecting([setupAppURL])
-    }
-
-    // MARK: MiddleClick (trackpad tap) helper
-
-    var middleClickInstalled: Bool {
-        middleClickURL != nil
-    }
-
-    /// Number of fingers MiddleClick uses for its tap gesture, or nil when the
-    /// gesture is disabled. Older builds store `trackpadThreeTap`; newer builds
-    /// store the finger count in `fingers`.
-    var middleClickFingerCount: Int? {
-        guard middleClickInstalled else { return nil }
-        let defaults = UserDefaults(suiteName: "art.ginzburg.MiddleClick")
-        if let enabled = defaults?.object(forKey: "trackpadThreeTap") as? Bool, !enabled {
-            return nil
-        }
-        let count = defaults?.object(forKey: "fingers") as? Int ?? 3
-        return count >= 3 ? count : nil
-    }
-
-    var middleClickURL: URL? {
-        NSWorkspace.shared.urlForApplication(withBundleIdentifier: "art.ginzburg.MiddleClick")
-            ?? NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.knollsoft.Middle")
-    }
-
-    func openMiddleClick() {
-        if let url = middleClickURL {
-            NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration(), completionHandler: nil)
-        } else if let url = URL(string: "https://github.com/artginzburg/MiddleClick") {
-            NSWorkspace.shared.open(url)
-        }
     }
 
     // MARK: Uninstall

@@ -7,7 +7,8 @@
 set -euo pipefail
 
 APP="$HOME/Applications/DockMiddleQuit.app"
-SOURCE="$HOME/Library/Application Support/DockMiddleQuit/DockMiddleQuit.swift"
+SUPPORT="$HOME/Library/Application Support/DockMiddleQuit"
+SOURCE="$SUPPORT/DockMiddleQuit.swift"
 BIN="$APP/Contents/MacOS/DockMiddleQuit"
 DOMAIN="gui/$(id -u)"
 LABEL="com.user.dockmiddlequit"
@@ -41,6 +42,9 @@ swiftc "$SOURCE" \
     -o "$TMP_BIN" \
     -O \
     -target "$(uname -m)-apple-macos13.0" \
+    -I "$SUPPORT/MultitouchSupport" \
+    -F /System/Library/PrivateFrameworks \
+    -framework MultitouchSupport \
     -framework Cocoa \
     -framework ApplicationServices \
     -framework ServiceManagement

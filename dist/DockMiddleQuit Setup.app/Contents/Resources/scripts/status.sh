@@ -45,6 +45,12 @@ echo "Log (last 30 lines): $LOG"
 tail -n 30 "$LOG" 2>&1
 
 echo ""
-echo "MiddleClick config:"
-defaults read art.ginzburg.MiddleClick 2>&1 | head -n 20
-defaults read com.knollsoft.Middle 2>&1 | head -n 20
+echo "Trackpad settings:"
+defaults read com.user.dockmiddlequit 2>/dev/null | grep -E 'middleClick' || echo "  defaults (3 fingers, tap-to-click on)"
+echo ""
+echo "MiddleClick app:"
+if pgrep -x MiddleClick >/dev/null 2>&1; then
+    echo "  running (quit it to avoid two middle clicks per gesture)"
+else
+    echo "  not running"
+fi

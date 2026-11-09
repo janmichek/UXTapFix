@@ -11,7 +11,7 @@ BUILD="$ROOT/build"
 ARCH="$(uname -m)"
 TARGET="$ARCH-apple-macos13.0"
 
-echo "Building DockMiddleQuit 2.2 -> $OUT"
+echo "Building DockMiddleQuit 2.3 -> $OUT"
 
 # MARK: Icon
 rm -rf "$BUILD/AppIcon.iconset"
@@ -30,6 +30,9 @@ swiftc "$ROOT/src/DockMiddleQuit.swift" \
   -o "$DAEMON_APP/Contents/MacOS/DockMiddleQuit" \
   -O \
   -target "$TARGET" \
+  -I "$ROOT/src/MultitouchSupport" \
+  -F /System/Library/PrivateFrameworks \
+  -framework MultitouchSupport \
   -framework Cocoa \
   -framework ApplicationServices \
   -framework ServiceManagement
@@ -47,6 +50,7 @@ plutil -lint "$SETUP_APP/Contents/Info.plist" >/dev/null
 # self-contained when moved to ~/Applications or a DMG.
 ditto "$DAEMON_APP" "$SETUP_APP/Contents/Resources/DockMiddleQuit.app"
 cp "$ROOT/src/DockMiddleQuit.swift" "$SETUP_APP/Contents/Resources/DockMiddleQuit.swift"
+ditto "$ROOT/src/MultitouchSupport" "$SETUP_APP/Contents/Resources/MultitouchSupport"
 ditto "$ROOT/scripts" "$SETUP_APP/Contents/Resources/scripts"
 
 swiftc "$ROOT/src/Setup/"*.swift \

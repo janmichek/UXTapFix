@@ -1,5 +1,7 @@
-// DockMiddleQuit v2.2
+// DockMiddleQuit v2.3
 // Middle-click (button 2) a Dock icon to quit that app.
+// Also turns a three-finger trackpad tap/click into a middle click, so the
+// same gesture closes a browser tab outside the Dock.
 // Supports CGEventTap (swallows the click) with an NSEvent global monitor fallback.
 //
 // The Setup app asks this binary to request TCC permissions and reads status.json
@@ -8,10 +10,11 @@ import Cocoa
 import ApplicationServices
 import CoreGraphics
 import Darwin
+import MultitouchSupport
 import ServiceManagement
 setlinebuf(stdout)
 
-let appVersion = "2.2"
+let appVersion = "2.3"
 let supportDirectory = FileManager.default.homeDirectoryForCurrentUser
     .appendingPathComponent("Library/Application Support/DockMiddleQuit", isDirectory: true)
 let statusFileURL = supportDirectory.appendingPathComponent("status.json")
@@ -23,6 +26,343 @@ var lastQuitName: String?
 var lastQuitAt: TimeInterval?
 var statusTimer: Timer?
 var reportedStatusWriteFailure = false
+
+// MARK: - Trackpad support (three-finger tap/click -> middle click)
+//
+// This uses the private MultitouchSupport.framework, the same undocumented
+// interface used by MiddleClick. It is not App Store compatible and Apple may
+// change it in any macOS release. If the framework is unavailable, the rest of
+// DockMiddleQuit keeps working and only the trackpad shortcut is lost.
+//
+// Configure with UserDefaults (domain com.user.dockmiddlequit):
+//   middleClickEmulation        Bool    default true
+//   middleClickFingers          Int     default 3
+//   middleClickAllowMoreFingers Bool    default false
+//   middleClickTapToClick       Bool    default true
+//   middleClickMaxTimeDelta     Double  default 300 (milliseconds)
+//   middleClickMaxDistanceDelta Double  default 0.05 (normalized units)
+
+@_silgen_name("MTDeviceCreateList")
+private func MTDeviceCreateList() -> Unmanaged<CFMutableArray>?
+
+private let touchCallback: MTFrameCallbackFunction = { _, touches, count, _, _ in
+    MiddleClickEmulator.shared.handleFrame(touches, count: count)
+}
+
+final class MiddleClickEmulator {
+    static let shared = MiddleClickEmulator()
+
+    // MARK: Configuration
+
+    let enabled: Bool
+    let fingerCount: Int
+    let allowMoreFingers: Bool
+    let tapToClick: Bool
+    let maxTimeDelta: TimeInterval
+    let maxDistanceDelta: Float
+
+    // MARK: Shared state (read by the event tap on another thread)
+
+    private let lock = NSLock()
+    private var threeFingersDown = false
+    private var wasThreeFingersDown = false
+    private var threeFingerClickStartedAt: TimeInterval = 0
+    private var lastMiddleClickAt: TimeInterval = 0
+
+    // MARK: Touch state
+
+    private var devices: [MTDevice] = []
+    private var tapStart: TimeInterval?
+    private var startPosition = SIMD2<Float>(0, 0)
+    private var currentPosition = SIMD2<Float>(0, 0)
+    private var gestureIsValid = false
+    private var lastEmulatedAt: TimeInterval = 0
+    private var retryTimer: Timer?
+    private var wakeObserver: NSObjectProtocol?
+    private var loggedRegistrationFailure = false
+
+    private init() {
+        let defaults = UserDefaults.standard
+
+        func boolValue(_ key: String, default value: Bool) -> Bool {
+            defaults.object(forKey: key) == nil ? value : defaults.bool(forKey: key)
+        }
+        func doubleValue(_ key: String, default value: Double) -> Double {
+            defaults.object(forKey: key) == nil ? value : defaults.double(forKey: key)
+        }
+
+        enabled = boolValue("middleClickEmulation", default: true)
+        fingerCount = max(1, defaults.object(forKey: "middleClickFingers") == nil
+                          ? 3
+                          : defaults.integer(forKey: "middleClickFingers"))
+        allowMoreFingers = boolValue("middleClickAllowMoreFingers", default: false)
+        tapToClick = boolValue("middleClickTapToClick", default: true)
+        maxTimeDelta = max(0.05, doubleValue("middleClickMaxTimeDelta", default: 300) / 1000)
+        maxDistanceDelta = Float(max(0.001, doubleValue("middleClickMaxDistanceDelta", default: 0.05)))
+    }
+
+    // MARK: Lifecycle
+
+    @discardableResult
+    func start() -> Bool {
+        guard enabled else {
+            print("[DockMiddleQuit] Three-finger middle-click disabled by preference.")
+            return false
+        }
+
+        lock.lock()
+        let alreadyRunning = !devices.isEmpty
+        lock.unlock()
+        if alreadyRunning { return true }
+
+        observeWake()
+        if registerDevices() {
+            return true
+        }
+        scheduleRetry()
+        return false
+    }
+
+    func stop() {
+        retryTimer?.invalidate()
+        retryTimer = nil
+
+        lock.lock()
+        let list = devices
+        devices.removeAll()
+        lock.unlock()
+
+        for device in list {
+            _ = device.unregister(contactFrameCallback: touchCallback)
+            device.stop()
+        }
+    }
+
+    func restart() {
+        stop()
+        _ = start()
+    }
+
+    private func registerDevices() -> Bool {
+        let list = MTDeviceCreateList()?.takeUnretainedValue() as? [MTDevice] ?? []
+        guard !list.isEmpty else {
+            if !loggedRegistrationFailure {
+                loggedRegistrationFailure = true
+                print("[DockMiddleQuit] No multitouch device found yet; will keep trying.")
+            }
+            return false
+        }
+
+        lock.lock()
+        devices = list
+        lock.unlock()
+
+        var registeredCount = 0
+        for device in list {
+            if device.register(contactFrameCallback: touchCallback) {
+                device.start(runMode: 0)
+                registeredCount += 1
+            }
+        }
+
+        guard registeredCount > 0 else {
+            print("[DockMiddleQuit] Could not register a multitouch callback; will keep trying.")
+            lock.lock()
+            devices.removeAll()
+            lock.unlock()
+            return false
+        }
+
+        retryTimer?.invalidate()
+        retryTimer = nil
+        loggedRegistrationFailure = false
+        print("[DockMiddleQuit] Three-finger middle-click enabled ✓ (\(fingerCount) fingers)")
+        return true
+    }
+
+    private func scheduleRetry() {
+        guard retryTimer == nil else { return }
+        retryTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            if self.registerDevices() {
+                self.retryTimer?.invalidate()
+                self.retryTimer = nil
+            }
+        }
+    }
+
+    private func observeWake() {
+        guard wakeObserver == nil else { return }
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            print("[DockMiddleQuit] System woke; reconnecting trackpad.")
+            self?.restart()
+        }
+    }
+
+    var isRunning: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return !devices.isEmpty
+    }
+
+    // MARK: Event-tap helpers
+
+    /// Called when a left/right mouse-down arrives while three fingers are down.
+    /// Returns true when the event should be rewritten to a middle click.
+    func beginThreeFingerClick() -> Bool {
+        let now = ProcessInfo.processInfo.systemUptime
+        lock.lock()
+        defer { lock.unlock() }
+        guard enabled, threeFingersDown else { return false }
+        threeFingersDown = false
+        wasThreeFingersDown = true
+        threeFingerClickStartedAt = now
+        lastMiddleClickAt = now
+        return true
+    }
+
+    /// Called when the matching left/right mouse-up arrives.
+    func endThreeFingerClick() -> Bool {
+        let now = ProcessInfo.processInfo.systemUptime
+        lock.lock()
+        defer { lock.unlock() }
+        guard wasThreeFingersDown else { return false }
+        wasThreeFingersDown = false
+        // A missed mouse-up should not rewrite a much later click.
+        return now - threeFingerClickStartedAt <= 5
+    }
+
+    /// Record a real or already-rewritten middle click so a tap is not also
+    /// converted into a second middle click.
+    func noteMiddleClick() {
+        lock.lock()
+        lastMiddleClickAt = ProcessInfo.processInfo.systemUptime
+        lock.unlock()
+    }
+
+    // MARK: Touch handling
+
+    func handleFrame(_ touches: UnsafeMutablePointer<MTTouch>?, count: Int32) {
+        guard enabled else { return }
+
+        let now = ProcessInfo.processInfo.systemUptime
+        let fingerTotal = Int(count)
+
+        lock.lock()
+
+        // All fingers lifted: decide whether this was a valid tap.
+        if fingerTotal == 0 {
+            let duration = tapStart.map { now - $0 } ?? .infinity
+            let distance = manhattan(startPosition, currentPosition)
+            let naturalClickGuard = maxTimeDelta * 0.75
+            let recentlyClicked = now - lastMiddleClickAt <= naturalClickGuard
+            let canPost = tapToClick
+                && gestureIsValid
+                && duration <= maxTimeDelta
+                && distance <= maxDistanceDelta
+                && !recentlyClicked
+                && now - lastEmulatedAt > maxTimeDelta * 0.3
+
+            tapStart = nil
+            gestureIsValid = false
+            threeFingersDown = false
+            if now - threeFingerClickStartedAt > 5 {
+                wasThreeFingersDown = false
+            }
+            if canPost { lastEmulatedAt = now }
+            lock.unlock()
+
+            if canPost {
+                postMiddleClick()
+            }
+            return
+        }
+
+        // Not tracking yet. Start only when the configured number of fingers
+        // is actually down; frames with one or two fingers are just the start
+        // of the gesture.
+        if tapStart == nil {
+            let canStart = fingerTotal == fingerCount
+                || (allowMoreFingers && fingerTotal > fingerCount)
+            guard canStart, let average = averagePosition(touches, count: fingerTotal) else {
+                threeFingersDown = false
+                lock.unlock()
+                return
+            }
+            tapStart = now
+            startPosition = average
+            currentPosition = average
+            gestureIsValid = true
+            threeFingersDown = true
+            lock.unlock()
+            return
+        }
+
+        // Fingers rarely lift on the same frame. Keep the last full position
+        // when one finger lifts first and wait for the final zero-finger frame.
+        if fingerTotal < fingerCount {
+            threeFingersDown = false
+            lock.unlock()
+            return
+        }
+
+        // Adding an extra finger cancels the gesture (unless explicitly allowed).
+        if !allowMoreFingers && fingerTotal > fingerCount {
+            tapStart = nil
+            gestureIsValid = false
+            threeFingersDown = false
+            lock.unlock()
+            return
+        }
+
+        threeFingersDown = true
+        if let average = averagePosition(touches, count: fingerTotal) {
+            currentPosition = average
+        }
+        if now - (tapStart ?? now) > maxTimeDelta {
+            gestureIsValid = false
+        }
+
+        lock.unlock()
+    }
+
+    private func averagePosition(_ touches: UnsafeMutablePointer<MTTouch>?, count: Int) -> SIMD2<Float>? {
+        guard let touches, count > 0 else { return nil }
+        let samples = min(fingerCount, count)
+        var sumX: Float = 0
+        var sumY: Float = 0
+        for index in 0..<samples {
+            let position = touches[index].normalizedVector.position
+            sumX += position.x
+            sumY += position.y
+        }
+        return SIMD2<Float>(sumX / Float(samples), sumY / Float(samples))
+    }
+
+    private func postMiddleClick() {
+        let location = CGEvent(source: nil)?.location ?? .zero
+        CGEvent(
+            mouseEventSource: nil,
+            mouseType: .otherMouseDown,
+            mouseCursorPosition: location,
+            mouseButton: .center
+        )?.post(tap: .cghidEventTap)
+        CGEvent(
+            mouseEventSource: nil,
+            mouseType: .otherMouseUp,
+            mouseCursorPosition: location,
+            mouseButton: .center
+        )?.post(tap: .cghidEventTap)
+    }
+
+    private func manhattan(_ a: SIMD2<Float>, _ b: SIMD2<Float>) -> Float {
+        abs(a.x - b.x) + abs(a.y - b.y)
+    }
+}
 
 // MARK: - Permission helpers
 
@@ -49,6 +389,9 @@ func writeStatus() {
         "accessibility": accessibilityGranted(),
         "inputMonitoring": inputMonitoringGranted(),
         "eventTapActive": eventTap != nil,
+        "middleClickEmulation": MiddleClickEmulator.shared.isRunning,
+        "middleClickEnabled": MiddleClickEmulator.shared.enabled,
+        "middleClickFingers": MiddleClickEmulator.shared.fingerCount,
         "startedAt": startedAt,
         "updatedAt": Date().timeIntervalSince1970
     ]
@@ -222,11 +565,30 @@ let middleButton: Int64 = 2
 func tapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent, refcon: UnsafeMutableRawPointer?) -> Unmanaged<CGEvent>? {
     if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
         if let t = eventTap { CGEvent.tapEnable(tap: t, enable: true) }
-        return Unmanaged.passRetained(event)
+        return Unmanaged.passUnretained(event)
     }
-    if type == .otherMouseDown {
+
+    let emulator = MiddleClickEmulator.shared
+
+    // Three fingers held down + a physical left/right click becomes a middle
+    // click. This mirrors MiddleClick and makes three-finger click work in
+    // browsers and Terminal, not just the tap-to-click gesture.
+    if type == .leftMouseDown || type == .rightMouseDown {
+        if emulator.beginThreeFingerClick() {
+            event.type = .otherMouseDown
+            event.setIntegerValueField(.mouseEventButtonNumber, value: middleButton)
+        }
+    } else if type == .leftMouseUp || type == .rightMouseUp {
+        if emulator.endThreeFingerClick() {
+            event.type = .otherMouseUp
+            event.setIntegerValueField(.mouseEventButtonNumber, value: middleButton)
+        }
+    }
+
+    if event.type == .otherMouseDown {
         let btn = event.getIntegerValueField(.mouseEventButtonNumber)
         if btn == middleButton {
+            emulator.noteMiddleClick()
             let loc = event.location
             if dockAppName(at: loc) != nil {
                 DispatchQueue.main.async { handleMiddleClick(at: loc) }
@@ -234,11 +596,15 @@ func tapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent, refc
             }
         }
     }
-    return Unmanaged.passRetained(event)
+    return Unmanaged.passUnretained(event)
 }
 
 func tryInstallEventTap() -> Bool {
     let mask: CGEventMask = (1 << CGEventType.otherMouseDown.rawValue)
+        | (1 << CGEventType.leftMouseDown.rawValue)
+        | (1 << CGEventType.leftMouseUp.rawValue)
+        | (1 << CGEventType.rightMouseDown.rawValue)
+        | (1 << CGEventType.rightMouseUp.rawValue)
         | (1 << CGEventType.tapDisabledByTimeout.rawValue)
         | (1 << CGEventType.tapDisabledByUserInput.rawValue)
     guard let tap = CGEvent.tapCreate(
@@ -284,8 +650,21 @@ if !tapOK {
     print("[DockMiddleQuit] Input Monitoring \(inputMonitoringGranted() ? "granted ✓" : "not granted")")
 }
 
+let middleClickOK = MiddleClickEmulator.shared.start()
+if MiddleClickEmulator.shared.enabled {
+    if middleClickOK {
+        print("[DockMiddleQuit] Three-finger tap/click sends a middle click. Middle-click a browser tab to close it.")
+    } else {
+        print("[DockMiddleQuit] Trackpad support unavailable; middle-click still works with a mouse or another gesture app.")
+    }
+}
+
+if !NSRunningApplication.runningApplications(withBundleIdentifier: "art.ginzburg.MiddleClick").isEmpty {
+    print("[DockMiddleQuit] ⚠️ MiddleClick is also running. Quit it to avoid two middle clicks per three-finger gesture.")
+}
+
 startStatusHeartbeat()
-print("[DockMiddleQuit] Ready. Middle-click (or 3-finger tap) any Dock icon to quit. PID \(getpid())")
+print("[DockMiddleQuit] Ready. Three-finger tap/click a Dock icon to quit; middle-click a browser tab to close it. PID \(getpid())")
 print("[DockMiddleQuit] Log: \(logFileURL.path)")
 
 signal(SIGTERM) { _ in

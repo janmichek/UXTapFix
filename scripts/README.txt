@@ -16,12 +16,13 @@ Installed locations
   Log:         ~/Library/Logs/DockMiddleQuit.log
   Live status: ~/Library/Application Support/DockMiddleQuit/status.json
   Source:      ~/Library/Application Support/DockMiddleQuit/DockMiddleQuit.swift
+  Header:      ~/Library/Application Support/DockMiddleQuit/MultitouchSupport/
 
 Scripts
 -------
   status.sh
       Shows the app version, launchd state, live permission check, status file,
-      log tail, and MiddleClick configuration.
+      log tail, trackpad settings, and whether MiddleClick is still running.
 
   restart.sh
       Restarts the LaunchAgent and prints the newest log lines.
@@ -44,7 +45,7 @@ Permissions (manual, by macOS design)
      Enable DockMiddleQuit (recommended; makes quitting smoother).
 
   If a switch already looks on but status still shows false, the entry belongs
-  to an older build. In Setup, click Reset on that permission card, then Grant
+  to an older build. In Setup, click Reset on that permission row, then Grant
   Access again. The equivalent terminal command is:
 
     tccutil reset Accessibility com.user.dockmiddlequit
@@ -60,9 +61,22 @@ Launch at login
 
 Three-finger tap
 ----------------
-  DockMiddleQuit reacts to a middle click. The free MiddleClick app maps a
-  three-finger tap to a middle click:
+  Built in. A three-finger tap (or a physical click with three fingers down on
+  the trackpad) sends a real middle click:
 
-    https://github.com/artginzburg/MiddleClick
+    Dock icon     -> the app quits
+    Browser tab   -> the tab closes
+    Terminal      -> selected text is pasted
 
-  The Setup app detects MiddleClick and offers to open it.
+  Quit the MiddleClick app if it is still running, otherwise one gesture makes
+  two middle clicks. Remove it with: brew uninstall --cask middleclick
+
+  Settings (then restart the service):
+
+    defaults write com.user.dockmiddlequit middleClickEmulation -bool false
+    defaults write com.user.dockmiddlequit middleClickFingers 4
+    defaults write com.user.dockmiddlequit middleClickTapToClick -bool false
+    launchctl kickstart -k gui/$(id -u)/com.user.dockmiddlequit
+
+  The gesture uses Apple's private MultitouchSupport framework and may stop
+  working after a macOS update.

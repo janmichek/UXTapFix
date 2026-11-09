@@ -67,7 +67,7 @@ if [[ "$mode" == "guided" ]]; then
     open "$SETUP_APP"
     echo ""
     echo "DockMiddleQuit Setup is opening. Follow the short steps:"
-    echo "  Welcome -> Install -> Access -> Login -> Ready"
+    echo "  Welcome -> Permissions -> Launch at Login -> Setup Complete"
     exit 0
 fi
 
@@ -98,6 +98,10 @@ xattr -dr com.apple.quarantine "$APP" 2>/dev/null || true
 # Keep the source and helper scripts with the installation, like the Setup app.
 if [[ -f "$ROOT/src/DockMiddleQuit.swift" ]]; then
     cp "$ROOT/src/DockMiddleQuit.swift" "$SUPPORT/"
+fi
+if [[ -d "$ROOT/src/MultitouchSupport" ]]; then
+    rm -rf "$SUPPORT/MultitouchSupport"
+    cp -R "$ROOT/src/MultitouchSupport" "$SUPPORT/"
 fi
 cp "$ROOT/scripts/"*.sh "$ROOT/scripts/README.txt" "$SUPPORT/"
 chmod +x "$SUPPORT/"*.sh
@@ -151,6 +155,6 @@ echo "  open 'x-apple.systempreferences:com.apple.preference.security?Privacy_Ac
 echo "  open 'x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent'"
 echo ""
 echo "If the permission switch already looks on but the app still reports false,"
-echo "click Reset in the Setup app's permission card, then Grant Access again."
+echo "click Reset in the Setup app's permission row, then Grant Access again."
 echo ""
 echo "Check the service with: $SUPPORT/status.sh"

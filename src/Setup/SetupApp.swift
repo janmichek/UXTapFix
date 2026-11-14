@@ -210,19 +210,12 @@ struct WelcomeView: View {
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    HStack(alignment: .center, spacing: 16) {
-                        Image(nsImage: NSApp.applicationIconImage)
-                            .resizable()
-                            .interpolation(.high)
-                            .frame(width: SetupStyle.iconSize, height: SetupStyle.iconSize)
+                VStack(alignment: .leading, spacing: 14) {
+                    WelcomeHero()
 
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("DockMiddleQuit")
-                                .font(.title.weight(.semibold))
-                            Text("Quit Dock apps and close browser tabs with a middle click.")
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
+                    HStack(alignment: .top, spacing: 12) {
+                        ForEach(FeaturePreviewKind.allCases) { kind in
+                            FeaturePreviewCard(kind: kind)
                         }
                     }
 
@@ -231,16 +224,19 @@ struct WelcomeView: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    GroupBox {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Label("Installs in your home folder", systemImage: "folder")
-                            Label("Asks for Accessibility and Input Monitoring", systemImage: "lock.shield")
-                            Label("Starts automatically when you log in", systemImage: "power")
-                        }
-                        .font(.callout)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 2)
+                    LazyVGrid(
+                        columns: [
+                            GridItem(.flexible(), alignment: .leading),
+                            GridItem(.flexible(), alignment: .leading)
+                        ],
+                        alignment: .leading,
+                        spacing: 6
+                    ) {
+                        Label("Opens links in a background tab", systemImage: "link")
+                        Label("Three-finger tap on the trackpad", systemImage: "hand.tap")
+                        Label("Starts automatically at login", systemImage: "power")
                     }
+                    .font(.callout)
 
                     if model.installed {
                         Notice(text: "DockMiddleQuit is already installed. Continue to review its permissions.")

@@ -51,9 +51,10 @@ and opens the same assistant.
 
 The assistant is a four-step native SwiftUI app:
 
-1. **Welcome** — a short summary. Click **Install** to copy `DockMiddleQuit.app`
-   to `~/Applications` and add a per-user LaunchAgent. No admin rights, no
-   system-wide changes.
+1. **Welcome** — animated previews of the two main gestures (quit a Dock app,
+   close a browser tab) plus a short summary. Click **Install** to copy
+   `DockMiddleQuit.app` to `~/Applications` and add a per-user LaunchAgent. No
+   admin rights, no system-wide changes.
 2. **Permissions** — opens the exact macOS privacy panes and shows permission
    status live, read from the running background service.
 3. **Launch at Login** — confirms the LaunchAgent so the utility is ready every

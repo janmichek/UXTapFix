@@ -123,6 +123,18 @@ is posted system-wide, so the app under the pointer decides what to do:
 | A link | The browser opens it in a background tab |
 | Terminal | Selected text is pasted |
 
+Repeating the middle-click on the same Dock icon escalates:
+
+| Middle-clicks on one Dock icon | What happens |
+| --- | --- |
+| 1× | The app quits normally. |
+| 2× | The app and its background helper processes quit; anything still running is forced after 1.2 s. |
+| 3× | The app and its helpers are force-quit immediately. |
+
+Clicks are counted within about 300 ms, so a single click waits that long
+before the app quits. Middle-clicks anywhere other than the Dock are never
+counted or delayed.
+
 The gesture is built in. You do **not** need MiddleClick anymore. If
 MiddleClick is still running, quit it first — otherwise one gesture produces
 two middle clicks. To remove it:
@@ -140,6 +152,8 @@ defaults write com.user.dockmiddlequit middleClickAllowMoreFingers -bool true
 defaults write com.user.dockmiddlequit middleClickTapToClick -bool false
 defaults write com.user.dockmiddlequit middleClickMaxTimeDelta 300
 defaults write com.user.dockmiddlequit middleClickMaxDistanceDelta 0.05
+defaults write com.user.dockmiddlequit middleClickMultiAction -bool false
+defaults write com.user.dockmiddlequit middleClickMultiClickWindow 300
 launchctl kickstart -k gui/$(id -u)/com.user.dockmiddlequit
 ```
 
@@ -152,6 +166,11 @@ launchctl kickstart -k gui/$(id -u)/com.user.dockmiddlequit
   disables the tap gesture.
 - `middleClickMaxTimeDelta` is milliseconds; `middleClickMaxDistanceDelta` is
   in normalized trackpad units.
+- `middleClickMultiAction false` turns off the 1×/2×/3× escalation: a single
+  click quits immediately again and extra clicks behave like single clicks.
+- `middleClickMultiClickWindow` is milliseconds, minimum 150. It is the
+  window in which repeated clicks on the same Dock icon count toward the
+  escalation.
 
 If macOS opens Look Up on a three-finger tap, both actions can fire. Set
 **System Settings → Trackpad → Point & Click → Look up & data detectors** to

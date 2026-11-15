@@ -5,6 +5,9 @@ enum SetupStyle {
     static let windowHeight: CGFloat = 460
     static let padding: CGFloat = 20
     static let iconSize: CGFloat = 64
+    static let heroCornerRadius: CGFloat = 12
+    static let previewCornerRadius: CGFloat = 10
+    static let previewStageHeight: CGFloat = 78
 }
 
 struct StepHeader: View {

@@ -10,8 +10,9 @@ SETUP_APP="$OUT/DockMiddleQuit Setup.app"
 BUILD="$ROOT/build"
 ARCH="$(uname -m)"
 TARGET="$ARCH-apple-macos13.0"
+VERSION="$(plutil -extract CFBundleShortVersionString raw "$ROOT/bundle/Info.plist")"
 
-echo "Building DockMiddleQuit 2.3 -> $OUT"
+echo "Building DockMiddleQuit $VERSION -> $OUT"
 
 # MARK: Icon
 rm -rf "$BUILD/AppIcon.iconset"

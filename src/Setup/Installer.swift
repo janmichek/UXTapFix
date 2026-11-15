@@ -6,13 +6,8 @@ import Foundation
 // MARK: - Status file written by the daemon
 
 struct DaemonStatus {
-    let version: String?
     let accessibility: Bool
     let inputMonitoring: Bool
-    let eventTapActive: Bool
-    let middleClickEmulation: Bool
-    let middleClickEnabled: Bool
-    let middleClickFingers: Int
     let updatedAt: Date
 
     var isFresh: Bool {
@@ -32,13 +27,8 @@ struct DaemonStatus {
         guard let updatedAt = number("updatedAt") else { return nil }
 
         return DaemonStatus(
-            version: object["version"] as? String,
             accessibility: (object["accessibility"] as? Bool) ?? false,
             inputMonitoring: (object["inputMonitoring"] as? Bool) ?? false,
-            eventTapActive: (object["eventTapActive"] as? Bool) ?? false,
-            middleClickEmulation: (object["middleClickEmulation"] as? Bool) ?? false,
-            middleClickEnabled: (object["middleClickEnabled"] as? Bool) ?? true,
-            middleClickFingers: (object["middleClickFingers"] as? NSNumber)?.intValue ?? 3,
             updatedAt: Date(timeIntervalSince1970: updatedAt)
         )
     }
@@ -52,7 +42,6 @@ final class SetupModel: ObservableObject {
         case welcome
         case permissions
         case login
-        case done
     }
 
     enum InstallPhase: Equatable {
@@ -144,7 +133,6 @@ final class SetupModel: ObservableObject {
     @Published var infoMessage: String?
     @Published var requestedPermission: PermissionKind?
     @Published var restartingService = false
-    @Published var showUninstallConfirmation = false
     @Published var hadLegacyInstall = false
     @Published var legacyLoginItemPresent = false
     @Published var middleClickAppRunning = false
@@ -206,9 +194,6 @@ final class SetupModel: ObservableObject {
     var serviceRunning: Bool { status?.isFresh == true }
     var accessibilityGranted: Bool { status?.accessibility == true }
     var inputMonitoringGranted: Bool { status?.inputMonitoring == true }
-    var middleClickEmulationActive: Bool { status?.middleClickEmulation == true }
-    var middleClickConfigured: Bool { status?.middleClickEnabled ?? true }
-    var middleClickFingers: Int { status?.middleClickFingers ?? 3 }
 
     // MARK: Lifecycle
 
@@ -225,11 +210,7 @@ final class SetupModel: ObservableObject {
             step = .welcome
             return
         }
-        if serviceRunning && accessibilityGranted && launchAtLogin {
-            step = .done
-        } else {
-            step = .permissions
-        }
+        step = .permissions
     }
 
     func refresh() {
@@ -290,8 +271,6 @@ final class SetupModel: ObservableObject {
         case .permissions:
             step = .login
         case .login:
-            step = .done
-        case .done:
             NSApp.terminate(nil)
         }
     }
@@ -304,8 +283,6 @@ final class SetupModel: ObservableObject {
             step = .welcome
         case .login:
             step = .permissions
-        case .done:
-            step = .login
         }
     }
 
@@ -382,6 +359,12 @@ final class SetupModel: ObservableObject {
 
     private func refreshLegacyLoginItemStatus() {
         guard !isCheckingLegacyLoginItem else { return }
+        // Skip the sfltool check when there is no legacy /Applications copy
+        // to migrate — otherwise the macOS confirmation returns on every launch.
+        guard fileManager.fileExists(atPath: legacyAppURL.path) else {
+            legacyLoginItemPresent = false
+            return
+        }
         isCheckingLegacyLoginItem = true
         Task { @MainActor in
             let present = await Task.detached(priority: .utility) {
@@ -613,24 +596,9 @@ final class SetupModel: ObservableObject {
         }
     }
 
-    func resetPermission(_ kind: PermissionKind) {
-        let result = clearPermissionRecord(kind)
-        if result.status == 0 {
-            requestedPermission = nil
-            infoMessage = "Cleared the saved \(kind.displayName) permission. Click Grant Access to request it again."
-        } else {
-            errorMessage = "Could not reset the \(kind.displayName) permission.\n\n\(result.output)"
-        }
-        refresh()
-    }
-
     @discardableResult
     private func clearPermissionRecord(_ kind: PermissionKind) -> ProcessResult {
         run("/usr/bin/tccutil", ["reset", kind.tccService, label])
-    }
-
-    func openPermissionSettings(_ kind: PermissionKind) {
-        openSettings(kind.settingsURL)
     }
 
     func openLoginItemsSettings() {
@@ -659,43 +627,6 @@ final class SetupModel: ObservableObject {
     private func openSettings(_ urlString: String) {
         guard let url = URL(string: urlString) else { return }
         NSWorkspace.shared.open(url)
-    }
-
-    // MARK: Misc actions
-
-    func openLog() {
-        if !fileManager.fileExists(atPath: logURL.path) {
-            try? fileManager.createDirectory(at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-            fileManager.createFile(atPath: logURL.path, contents: nil)
-        }
-        NSWorkspace.shared.open(logURL)
-    }
-
-    func revealApp() {
-        guard fileManager.fileExists(atPath: appURL.path) else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([appURL])
-    }
-
-    // MARK: Uninstall
-
-    func uninstall() async {
-        busy = true
-        _ = stopService()
-        stopRunningDaemons()
-        try? fileManager.removeItem(at: launchAgentURL)
-        try? fileManager.removeItem(at: appURL)
-        try? fileManager.removeItem(at: supportURL)
-        try? fileManager.removeItem(at: logURL)
-        _ = run("/usr/bin/tccutil", ["reset", "Accessibility", label])
-        _ = run("/usr/bin/tccutil", ["reset", "ListenEvent", label])
-
-        if fileManager.fileExists(atPath: setupAppURL.path) {
-            try? fileManager.removeItem(at: setupAppURL)
-        }
-        installed = false
-        launchAtLogin = false
-        status = nil
-        NSApp.terminate(nil)
     }
 
     // MARK: Process helpers

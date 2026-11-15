@@ -3,38 +3,46 @@ import SwiftUI
 
 // MARK: - Feature previews
 
-/// The gestures the welcome screen demonstrates.
+/// The features the welcome screen demonstrates.
 enum FeaturePreviewKind: String, CaseIterable, Identifiable {
+    case threeFingerTap
     case quitDockApp
-    case closeBrowserTab
+    case multiAction
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
+        case .threeFingerTap: return "Three-finger tap = middle click"
         case .quitDockApp: return "Quit a Dock app"
-        case .closeBrowserTab: return "Close a browser tab"
+        case .multiAction: return "Quit, stop, force quit"
         }
     }
 
     var caption: String {
         switch self {
-        case .quitDockApp: return "Middle-click a Dock icon and the app quits."
-        case .closeBrowserTab: return "Middle-click a browser tab and it closes."
+        case .threeFingerTap:
+            return "Tap the trackpad with three fingers to send a middle click."
+        case .quitDockApp:
+            return "Middle-click a Dock icon and the app quits."
+        case .multiAction:
+            return "Repeat the click on the same icon: quit, then stop background helpers and force quit, then force quit immediately."
         }
     }
 
     var hint: String {
         switch self {
+        case .threeFingerTap: return "Middle click"
         case .quitDockApp: return "Quit"
-        case .closeBrowserTab: return "Close"
+        case .multiAction: return "Force quit"
         }
     }
 
     var symbol: String {
         switch self {
+        case .threeFingerTap: return "hand.tap"
         case .quitDockApp: return "square.grid.2x2"
-        case .closeBrowserTab: return "macwindow"
+        case .multiAction: return "stop.fill"
         }
     }
 }
@@ -182,7 +190,8 @@ struct FeatureAnimationStage: View {
                     .frame(width: size.width, height: size.height)
             } else {
                 TimelineView(.animation) { context in
-                    scene(size: size, phase: FeatureAnimationClock.phase(at: context.date))
+                    let phase = FeatureAnimationClock.phase(at: context.date)
+                    scene(size: size, phase: phase, date: context.date)
                 }
             }
         }
@@ -191,12 +200,14 @@ struct FeatureAnimationStage: View {
     }
 
     @ViewBuilder
-    private func scene(size: CGSize, phase: FeatureAnimationClock.Phase) -> some View {
+    private func scene(size: CGSize, phase: FeatureAnimationClock.Phase, date: Date) -> some View {
         switch kind {
+        case .threeFingerTap:
+            TrackpadTapScene(size: size, phase: phase)
         case .quitDockApp:
             DockQuitScene(size: size, phase: phase)
-        case .closeBrowserTab:
-            BrowserTabScene(size: size, phase: phase)
+        case .multiAction:
+            EscalationScene(size: size, date: date)
         }
     }
 }
@@ -241,6 +252,19 @@ private struct Pointer: View {
             .shadow(color: Color(nsColor: .textBackgroundColor).opacity(0.9), radius: 2)
             .scaleEffect(pressed ? 0.88 : 1)
             .position(x: position.x, y: position.y)
+    }
+}
+
+private func poofBurst(center: CGPoint, radius: CGFloat, result: Double) -> some View {
+    ForEach(0..<6, id: \.self) { index in
+        let angle = Double(index) / 6 * 2 * Double.pi
+        Circle()
+            .fill(Color.accentColor.opacity(0.6 * (1 - result)))
+            .frame(width: 3.5, height: 3.5)
+            .position(
+                x: center.x + CGFloat(cos(angle)) * radius,
+                y: center.y + CGFloat(sin(angle)) * radius
+            )
     }
 }
 
@@ -298,7 +322,7 @@ private struct DockQuitScene: View {
             }
 
             if phase.result > 0.01 {
-                poofBurst(center: target, radius: 10 + result * 22)
+                poofBurst(center: target, radius: 10 + result * 22, result: phase.result)
             }
 
             if phase.result > 0.05 {
@@ -345,144 +369,170 @@ private struct DockQuitScene: View {
             .position(x: x, y: stripY + tile / 2 - lift * 5)
     }
 
-    private func poofBurst(center: CGPoint, radius: CGFloat) -> some View {
-        ForEach(0..<6, id: \.self) { index in
-            let angle = Double(index) / 6 * 2 * Double.pi
-            Circle()
-                .fill(Color.accentColor.opacity(0.6 * (1 - phase.result)))
-                .frame(width: 3.5, height: 3.5)
-                .position(
-                    x: center.x + CGFloat(cos(angle)) * radius,
-                    y: center.y + CGFloat(sin(angle)) * radius
-                )
-        }
-    }
 }
 
-// MARK: - Browser preview
+// MARK: - Three-finger tap preview
 
-private struct BrowserTabScene: View {
+/// A three-finger trackpad tap (or click) is synced to a real middle click at the pointer.
+private struct TrackpadTapScene: View {
     let size: CGSize
     let phase: FeatureAnimationClock.Phase
 
-    private let tabCount = 3
-    private let targetIndex = 1
-    private let tabGap: CGFloat = 3
-    private let tabHeight: CGFloat = 15
-    private let lineRatios: [CGFloat] = [0.86, 0.62, 0.74]
-
     var body: some View {
-        let inset: CGFloat = 9
-        let window = CGRect(
-            x: inset,
-            y: max(inset * 0.7, 5),
-            width: max(size.width - inset * 2, 1),
-            height: max(size.height - inset * 1.5, 1)
+        let trackpad = CGRect(
+            x: size.width * 0.05,
+            y: size.height * 0.06,
+            width: size.width * 0.90,
+            height: size.height * 0.58
         )
-        let stripX = window.minX + 8
-        let stripY = window.minY + 18
-        let stripWidth = max(window.width - 16, 1)
-        let layout = tabLayout(stripWidth: stripWidth)
-        let tabs = layout.widths
-        let target = CGPoint(x: stripX + layout.centers[targetIndex], y: stripY + tabHeight / 2)
-        let resting = CGPoint(x: size.width * 0.82, y: size.height * 0.94)
+        let press = CGPoint(x: trackpad.midX, y: trackpad.midY + 6)
+        let resting = CGPoint(x: size.width * 0.86, y: size.height * 0.90)
         let travel = CGFloat(phase.cursor)
-        let ripple = CGFloat(phase.ripple)
         let cursor = CGPoint(
-            x: resting.x + (target.x - resting.x) * travel,
-            y: resting.y + (target.y - resting.y) * travel
+            x: resting.x + (press.x - resting.x) * travel,
+            y: resting.y + (press.y - resting.y) * travel
         )
+        let ripple = CGFloat(phase.ripple)
+        let result = CGFloat(phase.result)
+        // The three fingers depress while the pointer approaches the trackpad.
+        let fingerPress = CGFloat(min(max((travel - 0.5) / 0.45, 0), 1))
 
         ZStack {
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(Color(nsColor: .textBackgroundColor))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .strokeBorder(Color.primary.opacity(0.10), lineWidth: 1)
                 )
-                .frame(width: window.width, height: window.height)
-                .position(x: window.midX, y: window.midY)
+                .frame(width: trackpad.width, height: trackpad.height)
+                .position(x: trackpad.midX, y: trackpad.midY)
 
-            HStack(spacing: 3) {
-                ForEach(0..<3, id: \.self) { _ in
-                    Circle()
-                        .fill(Color.primary.opacity(0.15))
-                        .frame(width: 4, height: 4)
-                }
-            }
-            .position(x: stripX + 12, y: stripY - 7)
-
-            ForEach(0..<tabCount, id: \.self) { index in
-                browserTab(width: tabs[index], isTarget: index == targetIndex)
+            ForEach(0..<3, id: \.self) { index in
+                Circle()
+                    .fill(Color.primary.opacity(0.5))
+                    .frame(width: 13, height: 13)
+                    .scaleEffect(1 - fingerPress * 0.4, anchor: .center)
                     .position(
-                        x: stripX + layout.centers[index],
-                        y: stripY + tabHeight / 2
+                        x: trackpad.midX - 16 + CGFloat(index) * 16,
+                        y: trackpad.midY - 30
                     )
             }
 
-            VStack(alignment: .leading, spacing: 5) {
-                ForEach(0..<lineRatios.count, id: \.self) { index in
-                    Capsule()
-                        .fill(Color.primary.opacity(0.10))
-                        .frame(width: (window.width - 32) * lineRatios[index], height: 5)
-                }
-            }
-            .frame(width: window.width - 32, alignment: .leading)
-            .position(
-                x: window.minX + 16 + (window.width - 32) / 2,
-                y: stripY + tabHeight + 18
-            )
-
-            if phase.ripple > 0.01 {
+            if ripple > 0.01 {
                 Circle()
-                    .stroke(Color.accentColor.opacity(0.8 * (1 - phase.ripple)), lineWidth: 1.5)
-                    .frame(width: tabHeight + ripple * 26, height: tabHeight + ripple * 26)
-                    .position(target)
+                    .stroke(Color.accentColor.opacity(0.8 * (1 - ripple)), lineWidth: 1.5)
+                    .frame(width: 24 + ripple * 30, height: 24 + ripple * 30)
+                    .position(press)
             }
 
-            if phase.result > 0.05 {
-                Text("Close")
+            if result > 0.05 {
+                poofBurst(center: press, radius: 10 + result * 22, result: phase.result)
+            }
+
+            if result > 0.05 {
+                Text("Middle click")
                     .font(.caption2.weight(.semibold))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(Capsule().fill(Color.primary.opacity(0.1)))
-                    .opacity(phase.result)
-                    .position(x: target.x, y: max(target.y + tabHeight * 2.8, 12))
+                    .opacity(result)
+                    .position(x: press.x, y: max(press.y - 26, 12))
             }
 
-            Pointer(position: cursor, pressed: phase.ripple > 0.35 && phase.ripple < 0.8)
+            Pointer(position: cursor, pressed: ripple > 0.35 && ripple < 0.8)
         }
         .frame(width: size.width, height: size.height)
     }
+}
 
-    private func tabLayout(stripWidth: CGFloat) -> (widths: [CGFloat], centers: [CGFloat]) {
-        let available = max(stripWidth - CGFloat(tabCount - 1) * tabGap, 1)
-        let base = available / CGFloat(tabCount)
-        let closed = base * (1 - CGFloat(phase.result))
-        let open = (available - closed) / CGFloat(tabCount - 1)
-        let widths = [open, closed, open]
+// MARK: - Multi-action preview
 
-        var centers: [CGFloat] = []
-        var offset: CGFloat = 0
-        for width in widths {
-            centers.append(offset + width / 2)
-            offset += width + tabGap
+/// Repeated middle-clicks on one Dock icon escalate: quit, stop+force, force quit.
+private struct EscalationScene: View {
+    let size: CGSize
+    let date: Date
+
+    private let clickTimes: [TimeInterval] = [1.5, 3.3, 5.1]
+    private let stepLabels = [
+        "Quit normally",
+        "Stop background, then force quit",
+        "Force quit immediately"
+    ]
+
+    var body: some View {
+        let elapsed = date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: FeatureAnimationClock.loop)
+        let firedCount = clickTimes.filter { elapsed >= $0 }.count
+        let highlight = firedCount > 0 ? min(firedCount - 1, 2) : nil
+        let since = highlight.map { elapsed - clickTimes[$0] } ?? 0
+        let ripple = CGFloat(FeatureAnimationClock.pulse(since, from: 0, to: 0.6))
+        let pressed = highlight != nil && since > 0.1 && since < 0.5
+
+        let tile = min(max(size.height * 0.30, 20), 32)
+        let target = CGPoint(x: size.width * 0.42, y: size.height * 0.50)
+        let resting = CGPoint(x: size.width * 0.86, y: size.height * 0.90)
+        let approach = CGFloat(FeatureAnimationClock.smoothstep(min(max(elapsed, 0.5), 1.5), from: 0.5, to: 1.5))
+        let cursor = CGPoint(
+            x: resting.x + (target.x - resting.x) * approach,
+            y: resting.y + (target.y - resting.y) * approach
+        )
+
+        ZStack {
+            RoundedRectangle(cornerRadius: tile * 0.3, style: .continuous)
+                .fill(Color(nsColor: .textBackgroundColor))
+                .overlay(
+                    Image(systemName: "square.grid.2x2")
+                        .font(.system(size: tile * 0.5))
+                        .foregroundStyle(Color.primary.opacity(0.75))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: tile * 0.3)
+                        .strokeBorder(Color.primary.opacity(0.10), lineWidth: 1)
+                )
+                .frame(width: tile, height: tile)
+                .scaleEffect(highlight != nil && since > 0.05 && since < 0.5 ? 0.93 : 1)
+                .position(target)
+
+            if ripple > 0.01 {
+                Circle()
+                    .stroke(Color.accentColor.opacity(0.8 * (1 - ripple)), lineWidth: 1.5)
+                    .frame(width: tile + ripple * 30, height: tile + ripple * 30)
+                    .position(target)
+            }
+
+            if highlight != nil, since > 0.35 {
+                poofBurst(center: target, radius: 8 + CGFloat(since) * 14, result: min(since, 1))
+            }
+
+            Pointer(position: cursor, pressed: pressed)
+
+            VStack(spacing: 7) {
+                ForEach(0..<3, id: \.self) { index in
+                    let fired = elapsed >= clickTimes[index]
+                    HStack(spacing: 8) {
+                        Text("\(index + 1)×")
+                            .font(.caption2.weight(.bold))
+                            .frame(width: 18, alignment: .trailing)
+                        Text(stepLabels[index])
+                            .font(.caption2)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 3.5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(highlight == index ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.03))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(highlight == index ? 0.30 : 0.06), lineWidth: 1)
+                    )
+                    .foregroundStyle(fired ? Color.primary : Color.secondary.opacity(0.7))
+                    .opacity(fired ? 1 : 0.45)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+            .position(x: size.width / 2, y: size.height * 0.84)
         }
-
-        return (widths, centers)
-    }
-
-    private func browserTab(width: CGFloat, isTarget: Bool) -> some View {
-        let applied = max(width, 0.5)
-
-        return RoundedRectangle(cornerRadius: 3, style: .continuous)
-            .fill(Color.primary.opacity(isTarget ? 0.14 : 0.07))
-            .overlay(
-                Capsule()
-                    .fill(Color.primary.opacity(0.18))
-                    .frame(width: max(applied * 0.45, 2), height: 2)
-            )
-            .frame(width: applied, height: tabHeight)
-            .opacity(isTarget ? 1 - phase.result : 1)
+        .frame(width: size.width, height: size.height)
     }
 }

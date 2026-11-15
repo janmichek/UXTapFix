@@ -37,8 +37,8 @@ INSTALL
    If macOS says it can't verify the app, right-click it and choose Open.
    That warning appears because this build is ad-hoc signed, not notarized.
 
-2. Follow the four steps:
-   Welcome -> Permissions -> Launch at Login -> Setup Complete.
+2. Follow the three steps:
+   Welcome -> Permissions -> Launch at Login.
 
    No admin password is needed. The app is installed in your user folder:
    ~/Applications/DockMiddleQuit.app
@@ -54,9 +54,8 @@ macOS requires you to approve two switches manually:
   - Input Monitoring (recommended)
 
 The Setup app opens the exact System Settings pane and updates live when the
-switch is on. If a switch already looks on but status stays off, click Reset
-on that permission row, then Grant Access again. This clears an old entry
-left behind by a previous build.
+switch is on. If a switch already looks on but status stays off, click Grant
+Access again. Setup clears the old entry left behind by a previous build.
 
 THREE-FINGER TAP
 ----------------
@@ -80,9 +79,12 @@ still works with a real middle-click mouse.
 
 UNINSTALL
 ---------
-Reopen "DockMiddleQuit Setup.app" (it is copied to ~/Applications) and use
-the menu in the window toolbar -> Uninstall. This removes the app, login item,
-helper files, and its privacy permissions.
+Run the headless uninstaller:
+
+  ~/Library/Application Support/DockMiddleQuit/uninstall.sh
+
+That removes the app, Setup app, login item, helper files, and privacy
+permissions.
 README
 
 echo ""

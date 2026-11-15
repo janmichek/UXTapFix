@@ -24,7 +24,6 @@ let logFileURL = FileManager.default.homeDirectoryForCurrentUser
 let startedAt = Date().timeIntervalSince1970
 var lastQuitName: String?
 var lastQuitAt: TimeInterval?
-var statusTimer: Timer?
 var reportedStatusWriteFailure = false
 
 // MARK: - Trackpad support (three-finger tap/click -> middle click)
@@ -41,6 +40,8 @@ var reportedStatusWriteFailure = false
 //   middleClickTapToClick       Bool    default true
 //   middleClickMaxTimeDelta     Double  default 300 (milliseconds)
 //   middleClickMaxDistanceDelta Double  default 0.05 (normalized units)
+//   middleClickMultiAction      Bool    default true
+//   middleClickMultiClickWindow Double  default 300 (milliseconds, minimum 150)
 
 @_silgen_name("MTDeviceCreateList")
 private func MTDeviceCreateList() -> Unmanaged<CFMutableArray>?
@@ -64,9 +65,9 @@ final class MiddleClickEmulator {
     // MARK: Shared state (read by the event tap on another thread)
 
     private let lock = NSLock()
-    private var threeFingersDown = false
-    private var wasThreeFingersDown = false
-    private var threeFingerClickStartedAt: TimeInterval = 0
+    private var fingersDown = false
+    private var wasFingersDown = false
+    private var clickStartedAt: TimeInterval = 0
     // Set when a physical click is rewritten, so the tap does not also post.
     private var lastPhysicalClickAt: TimeInterval = 0
 
@@ -218,10 +219,10 @@ final class MiddleClickEmulator {
         let now = ProcessInfo.processInfo.systemUptime
         lock.lock()
         defer { lock.unlock() }
-        guard enabled, threeFingersDown else { return false }
-        threeFingersDown = false
-        wasThreeFingersDown = true
-        threeFingerClickStartedAt = now
+        guard enabled, fingersDown else { return false }
+        fingersDown = false
+        wasFingersDown = true
+        clickStartedAt = now
         lastPhysicalClickAt = now
         return true
     }
@@ -231,10 +232,10 @@ final class MiddleClickEmulator {
         let now = ProcessInfo.processInfo.systemUptime
         lock.lock()
         defer { lock.unlock() }
-        guard wasThreeFingersDown else { return false }
-        wasThreeFingersDown = false
+        guard wasFingersDown else { return false }
+        wasFingersDown = false
         // A missed mouse-up should not rewrite a much later click.
-        return now - threeFingerClickStartedAt <= 5
+        return now - clickStartedAt <= 5
     }
 
     // MARK: Touch handling
@@ -262,9 +263,9 @@ final class MiddleClickEmulator {
 
             tapStart = nil
             gestureIsValid = false
-            threeFingersDown = false
-            if now - threeFingerClickStartedAt > 5 {
-                wasThreeFingersDown = false
+            fingersDown = false
+            if now - clickStartedAt > 5 {
+                wasFingersDown = false
             }
             if canPost { lastEmulatedAt = now }
             lock.unlock()
@@ -282,7 +283,7 @@ final class MiddleClickEmulator {
             let canStart = fingerTotal == fingerCount
                 || (allowMoreFingers && fingerTotal > fingerCount)
             guard canStart, let average = averagePosition(touches, count: fingerTotal) else {
-                threeFingersDown = false
+                fingersDown = false
                 lock.unlock()
                 return
             }
@@ -290,7 +291,7 @@ final class MiddleClickEmulator {
             startPosition = average
             currentPosition = average
             gestureIsValid = true
-            threeFingersDown = true
+            fingersDown = true
             lock.unlock()
             return
         }
@@ -298,7 +299,7 @@ final class MiddleClickEmulator {
         // Fingers rarely lift on the same frame. Keep the last full position
         // when one finger lifts first and wait for the final zero-finger frame.
         if fingerTotal < fingerCount {
-            threeFingersDown = false
+            fingersDown = false
             lock.unlock()
             return
         }
@@ -307,12 +308,12 @@ final class MiddleClickEmulator {
         if !allowMoreFingers && fingerTotal > fingerCount {
             tapStart = nil
             gestureIsValid = false
-            threeFingersDown = false
+            fingersDown = false
             lock.unlock()
             return
         }
 
-        threeFingersDown = true
+        fingersDown = true
         if let average = averagePosition(touches, count: fingerTotal) {
             currentPosition = average
         }
@@ -406,7 +407,7 @@ func writeStatus() {
 
 func startStatusHeartbeat() {
     writeStatus()
-    statusTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
+    _ = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
         writeStatus()
     }
 }

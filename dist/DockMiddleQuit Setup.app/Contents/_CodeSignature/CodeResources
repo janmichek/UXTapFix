@@ -6,7 +6,7 @@
 	<dict>
 		<key>Resources/AppIcon.icns</key>
 		<data>
-		bpbSlgu5qw20Z6L0o1ipjUdVdE4=
+		DO35+HKtdryYU9sRP44Axq1EexA=
 		</data>
 		<key>Resources/DockMiddleQuit.app/Contents/Info.plist</key>
 		<data>
@@ -14,19 +14,19 @@
 		</data>
 		<key>Resources/DockMiddleQuit.app/Contents/MacOS/DockMiddleQuit</key>
 		<data>
-		me3GReoNniuArVzra9iC6fa1ov8=
+		Kpufqq1JhFFtnUMPBzW42TJGvGs=
 		</data>
 		<key>Resources/DockMiddleQuit.app/Contents/Resources/AppIcon.icns</key>
 		<data>
-		bpbSlgu5qw20Z6L0o1ipjUdVdE4=
+		DO35+HKtdryYU9sRP44Axq1EexA=
 		</data>
 		<key>Resources/DockMiddleQuit.app/Contents/_CodeSignature/CodeResources</key>
 		<data>
-		aLnRBnLAhfxyITIFPgT0aKFz2Is=
+		UUFqv7hPUHFpCwWYZnYZmbbjs5M=
 		</data>
 		<key>Resources/DockMiddleQuit.swift</key>
 		<data>
-		D8qqSpaAnzUCBRA4z6SNYWFpp+o=
+		5bCnK5CQRsbOXRSrE3wher3NCQ8=
 		</data>
 		<key>Resources/MultitouchSupport/MultitouchSupport.h</key>
 		<data>
@@ -38,7 +38,7 @@
 		</data>
 		<key>Resources/scripts/README.txt</key>
 		<data>
-		wETRKjfEZAwaLr3e6TDK9kivwA8=
+		bI2/N/Xi06ARu0NEAxBm5nyS48c=
 		</data>
 		<key>Resources/scripts/enable-finder-quit.sh</key>
 		<data>
@@ -54,7 +54,7 @@
 		</data>
 		<key>Resources/scripts/uninstall.sh</key>
 		<data>
-		nq33qOXIAmtP+Qu8gZqWHmyPGoU=
+		OobQXKBi20a/prwpQq8UgQCIXkg=
 		</data>
 	</dict>
 	<key>files2</key>
@@ -63,7 +63,7 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			FMTA/yg3D9JjN4XPWvaglxKTLGfybdl4BJVXKhZ05xg=
+			V3E+6zLhg7QgoHAA0cnXTMba887FkICZ/FPQ8EndcYE=
 			</data>
 		</dict>
 		<key>Resources/DockMiddleQuit.app/Contents/Info.plist</key>
@@ -77,28 +77,28 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			xyjiHkIp6yIKOgdFWdsmNGKamDn9IedPzyGMPnEfH5A=
+			w6df1UOSHiUg5BZN1k5l/37a6TLgvRlLk/kqkBXfruU=
 			</data>
 		</dict>
 		<key>Resources/DockMiddleQuit.app/Contents/Resources/AppIcon.icns</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			FMTA/yg3D9JjN4XPWvaglxKTLGfybdl4BJVXKhZ05xg=
+			V3E+6zLhg7QgoHAA0cnXTMba887FkICZ/FPQ8EndcYE=
 			</data>
 		</dict>
 		<key>Resources/DockMiddleQuit.app/Contents/_CodeSignature/CodeResources</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			S3WstXb9n2qFXvoPqNLvdk0xJlfSBamJqXx1nIQSom0=
+			wcnm6h6W30dFsk49tJAFr1krEZ538Zj0TQbEwHnJQJk=
 			</data>
 		</dict>
 		<key>Resources/DockMiddleQuit.swift</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			uDyFa8Trk74P69UdmRVChuBmN0kcbYBC0ea8XFZnM80=
+			i/bHu3hpkZiBaurtUiAe2eEhCShVKtqBfQYrUs5lHgU=
 			</data>
 		</dict>
 		<key>Resources/MultitouchSupport/MultitouchSupport.h</key>
@@ -119,7 +119,7 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			ZTmsmj5gH84MdtyaPa8VKPV5dagGAfdy7LUpAGymnI8=
+			MIOKt5pU0nEii5pBSU333SBtLKVJibFUM6V3RLPpGJY=
 			</data>
 		</dict>
 		<key>Resources/scripts/enable-finder-quit.sh</key>
@@ -147,7 +147,7 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			W4Aojh9C/QNAqvHp6wnrOXqa3zDOHZe1HmPy5iZFKx4=
+			yoEsTV72XMvpcU3vD345HHt2Au4zocsBoiz/VRADdPg=
 			</data>
 		</dict>
 	</dict>

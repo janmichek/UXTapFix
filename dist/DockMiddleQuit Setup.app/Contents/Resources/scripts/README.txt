@@ -1,7 +1,7 @@
 DockMiddleQuit helper scripts
 =============================
 
-The main way to install, repair permissions, and uninstall is the guided app:
+The main way to install and repair permissions is the guided app:
 
   ~/Applications/DockMiddleQuit Setup.app
 
@@ -45,8 +45,8 @@ Permissions (manual, by macOS design)
      Enable DockMiddleQuit (recommended; makes quitting smoother).
 
   If a switch already looks on but status still shows false, the entry belongs
-  to an older build. In Setup, click Reset on that permission row, then Grant
-  Access again. The equivalent terminal command is:
+  to an older build. In Setup, click Grant Access again; it clears the stale
+  record first. The equivalent terminal command is:
 
     tccutil reset Accessibility com.user.dockmiddlequit
     tccutil reset ListenEvent com.user.dockmiddlequit

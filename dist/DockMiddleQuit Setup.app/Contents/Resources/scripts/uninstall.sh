@@ -34,7 +34,6 @@ rm -rf "$APP"
 rm -rf "$SETUP_APP"
 rm -rf "$SUPPORT"
 rm -f "$LOG"
-rm -f "$HOME/.local/bin/dock-middle-quit"
 
 echo "Clearing privacy records…"
 tccutil reset Accessibility "$LABEL" 2>/dev/null || true

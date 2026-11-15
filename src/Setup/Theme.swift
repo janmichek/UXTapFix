@@ -32,12 +32,11 @@ struct StatusLabel: View {
         case granted
         case required
         case optional
-        case problem
 
         var icon: String {
             switch self {
             case .granted: return "checkmark.circle.fill"
-            case .required, .problem: return "exclamationmark.triangle.fill"
+            case .required: return "exclamationmark.triangle.fill"
             case .optional: return "minus.circle"
             }
         }
@@ -45,7 +44,7 @@ struct StatusLabel: View {
         var color: Color {
             switch self {
             case .granted: return .green
-            case .required, .problem: return .orange
+            case .required: return .orange
             case .optional: return .secondary
             }
         }
@@ -106,27 +105,5 @@ struct SetupFooter<Content: View>: View {
             .padding(.horizontal, SetupStyle.padding)
             .padding(.vertical, 12)
         }
-    }
-}
-
-struct SummaryRow: View {
-    let title: String
-    let value: String
-    let kind: StatusLabel.Kind
-    var actionTitle: String?
-    var action: (() -> Void)?
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Text(title)
-            Spacer()
-            StatusLabel(text: value, kind: kind)
-            if let actionTitle, let action {
-                Button(actionTitle, action: action)
-                    .controlSize(.small)
-            }
-        }
-        .font(.callout)
-        .padding(.vertical, 2)
     }
 }

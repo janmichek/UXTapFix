@@ -24,7 +24,6 @@ let logFileURL = FileManager.default.homeDirectoryForCurrentUser
 let startedAt = Date().timeIntervalSince1970
 var lastQuitName: String?
 var lastQuitAt: TimeInterval?
-var statusTimer: Timer?
 var reportedStatusWriteFailure = false
 
 // MARK: - Trackpad support (three-finger tap/click -> middle click)
@@ -41,6 +40,8 @@ var reportedStatusWriteFailure = false
 //   middleClickTapToClick       Bool    default true
 //   middleClickMaxTimeDelta     Double  default 300 (milliseconds)
 //   middleClickMaxDistanceDelta Double  default 0.05 (normalized units)
+//   middleClickMultiAction      Bool    default true
+//   middleClickMultiClickWindow Double  default 300 (milliseconds, minimum 150)
 
 @_silgen_name("MTDeviceCreateList")
 private func MTDeviceCreateList() -> Unmanaged<CFMutableArray>?
@@ -64,10 +65,11 @@ final class MiddleClickEmulator {
     // MARK: Shared state (read by the event tap on another thread)
 
     private let lock = NSLock()
-    private var threeFingersDown = false
-    private var wasThreeFingersDown = false
-    private var threeFingerClickStartedAt: TimeInterval = 0
-    private var lastMiddleClickAt: TimeInterval = 0
+    private var fingersDown = false
+    private var wasFingersDown = false
+    private var clickStartedAt: TimeInterval = 0
+    // Set when a physical click is rewritten, so the tap does not also post.
+    private var lastPhysicalClickAt: TimeInterval = 0
 
     // MARK: Touch state
 
@@ -217,11 +219,11 @@ final class MiddleClickEmulator {
         let now = ProcessInfo.processInfo.systemUptime
         lock.lock()
         defer { lock.unlock() }
-        guard enabled, threeFingersDown else { return false }
-        threeFingersDown = false
-        wasThreeFingersDown = true
-        threeFingerClickStartedAt = now
-        lastMiddleClickAt = now
+        guard enabled, fingersDown else { return false }
+        fingersDown = false
+        wasFingersDown = true
+        clickStartedAt = now
+        lastPhysicalClickAt = now
         return true
     }
 
@@ -230,18 +232,10 @@ final class MiddleClickEmulator {
         let now = ProcessInfo.processInfo.systemUptime
         lock.lock()
         defer { lock.unlock() }
-        guard wasThreeFingersDown else { return false }
-        wasThreeFingersDown = false
+        guard wasFingersDown else { return false }
+        wasFingersDown = false
         // A missed mouse-up should not rewrite a much later click.
-        return now - threeFingerClickStartedAt <= 5
-    }
-
-    /// Record a real or already-rewritten middle click so a tap is not also
-    /// converted into a second middle click.
-    func noteMiddleClick() {
-        lock.lock()
-        lastMiddleClickAt = ProcessInfo.processInfo.systemUptime
-        lock.unlock()
+        return now - clickStartedAt <= 5
     }
 
     // MARK: Touch handling
@@ -259,7 +253,7 @@ final class MiddleClickEmulator {
             let duration = tapStart.map { now - $0 } ?? .infinity
             let distance = manhattan(startPosition, currentPosition)
             let naturalClickGuard = maxTimeDelta * 0.75
-            let recentlyClicked = now - lastMiddleClickAt <= naturalClickGuard
+            let recentlyClicked = now - lastPhysicalClickAt <= naturalClickGuard
             let canPost = tapToClick
                 && gestureIsValid
                 && duration <= maxTimeDelta
@@ -269,9 +263,9 @@ final class MiddleClickEmulator {
 
             tapStart = nil
             gestureIsValid = false
-            threeFingersDown = false
-            if now - threeFingerClickStartedAt > 5 {
-                wasThreeFingersDown = false
+            fingersDown = false
+            if now - clickStartedAt > 5 {
+                wasFingersDown = false
             }
             if canPost { lastEmulatedAt = now }
             lock.unlock()
@@ -289,7 +283,7 @@ final class MiddleClickEmulator {
             let canStart = fingerTotal == fingerCount
                 || (allowMoreFingers && fingerTotal > fingerCount)
             guard canStart, let average = averagePosition(touches, count: fingerTotal) else {
-                threeFingersDown = false
+                fingersDown = false
                 lock.unlock()
                 return
             }
@@ -297,7 +291,7 @@ final class MiddleClickEmulator {
             startPosition = average
             currentPosition = average
             gestureIsValid = true
-            threeFingersDown = true
+            fingersDown = true
             lock.unlock()
             return
         }
@@ -305,7 +299,7 @@ final class MiddleClickEmulator {
         // Fingers rarely lift on the same frame. Keep the last full position
         // when one finger lifts first and wait for the final zero-finger frame.
         if fingerTotal < fingerCount {
-            threeFingersDown = false
+            fingersDown = false
             lock.unlock()
             return
         }
@@ -314,12 +308,12 @@ final class MiddleClickEmulator {
         if !allowMoreFingers && fingerTotal > fingerCount {
             tapStart = nil
             gestureIsValid = false
-            threeFingersDown = false
+            fingersDown = false
             lock.unlock()
             return
         }
 
-        threeFingersDown = true
+        fingersDown = true
         if let average = averagePosition(touches, count: fingerTotal) {
             currentPosition = average
         }
@@ -413,7 +407,7 @@ func writeStatus() {
 
 func startStatusHeartbeat() {
     writeStatus()
-    statusTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
+    _ = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
         writeStatus()
     }
 }
@@ -512,23 +506,67 @@ func isBlacklisted(_ name: String) -> Bool {
     return ["trash", "launchpad", "mission control", "finder"].contains(lower)
 }
 
-func quitApp(named name: String) {
+enum QuitMode {
+    case normal      // graceful quit, the v2.3 behavior
+    case background  // quit the app and its helpers, force leftovers after a grace period
+    case force       // immediate force quit
+}
+
+func backgroundHelpers(of app: NSRunningApplication) -> [NSRunningApplication] {
+    // Chrome-, Slack- and VS Code-style helpers share the app's bundle ID with
+    // a dot suffix; an exact match or "<bundleID>." prefix keeps siblings such
+    // as com.apple.SafariServices out of a com.apple.Safari quit.
+    guard let bundleID = app.bundleIdentifier, !bundleID.isEmpty else { return [] }
+    let prefix = bundleID + "."
+    return NSWorkspace.shared.runningApplications.filter { other in
+        guard other.processIdentifier != app.processIdentifier,
+              let otherID = other.bundleIdentifier,
+              !otherID.isEmpty else { return false }
+        return otherID == bundleID || otherID.hasPrefix(prefix)
+    }
+}
+
+func scheduleForceTerminate(_ apps: [NSRunningApplication], after delay: TimeInterval) {
+    DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+        for app in apps where !app.isTerminated {
+            app.forceTerminate()
+        }
+    }
+}
+
+func quitApp(named name: String, mode: QuitMode = .normal) {
     if isBlacklisted(name) {
         print("[DockMiddleQuit] Ignoring blacklisted '\(name)'")
         return
     }
     let apps = NSWorkspace.shared.runningApplications
     if let app = apps.first(where: { $0.localizedName == name }) {
-        print("[DockMiddleQuit] Quitting '\(name)' pid \(app.processIdentifier)")
         lastQuitName = name
         lastQuitAt = Date().timeIntervalSince1970
         writeStatus()
-        if !app.terminate() {
-            print("[DockMiddleQuit] terminate() false, retry forceTerminate in 1.2s")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                if !app.isTerminated { app.forceTerminate() }
+        switch mode {
+        case .normal:
+            print("[DockMiddleQuit] Quitting '\(name)' pid \(app.processIdentifier)")
+            if !app.terminate() {
+                print("[DockMiddleQuit] terminate() false, retry forceTerminate in 1.2s")
+                scheduleForceTerminate([app], after: 1.2)
             }
+        case .background:
+            let helpers = backgroundHelpers(of: app)
+            print("[DockMiddleQuit] Quitting '\(name)' pid \(app.processIdentifier) and \(helpers.count) background process(es)")
+            _ = app.terminate()
+            for helper in helpers { _ = helper.terminate() }
+            scheduleForceTerminate([app] + helpers, after: 1.2)
+        case .force:
+            let helpers = backgroundHelpers(of: app)
+            print("[DockMiddleQuit] Force quitting '\(name)' pid \(app.processIdentifier) and \(helpers.count) background process(es)")
+            app.forceTerminate()
+            for helper in helpers { helper.forceTerminate() }
         }
+        return
+    }
+    if case .force = mode {
+        print("[DockMiddleQuit] No running app for '\(name)' to force quit")
         return
     }
     print("[DockMiddleQuit] No NSRunningApp for '\(name)', trying AppleScript")
@@ -550,11 +588,49 @@ func quitApp(named name: String) {
 
 // MARK: - Event handling (shared)
 
-func handleMiddleClick(at point: CGPoint) {
-    if let name = dockAppName(at: point) {
-        print("[DockMiddleQuit] middle-click on '\(name)' at \(point) -> quit")
-        quitApp(named: name)
+// Repeated middle-clicks on one Dock icon escalate: 1 = quit, 2 = quit the
+// app and its helpers, 3 = force quit. Clicks are counted in a short window so
+// that a single click keeps its usual meaning.
+let multiClickEnabled: Bool = UserDefaults.standard.object(forKey: "middleClickMultiAction") == nil
+    ? true
+    : UserDefaults.standard.bool(forKey: "middleClickMultiAction")
+let multiClickWindow: TimeInterval = max(
+    0.15,
+    (UserDefaults.standard.object(forKey: "middleClickMultiClickWindow") == nil
+        ? 300
+        : UserDefaults.standard.double(forKey: "middleClickMultiClickWindow")) / 1000
+)
+
+var pendingDockClickCount = 0
+var pendingDockClickName: String?
+var pendingDockClickWorkItem: DispatchWorkItem?
+
+func registerDockMiddleClick(appName: String) {
+    guard multiClickEnabled else {
+        quitApp(named: appName)
+        return
     }
+    if pendingDockClickName != appName {
+        pendingDockClickName = appName
+        pendingDockClickCount = 0
+    }
+    pendingDockClickCount = min(pendingDockClickCount + 1, 3)
+    let count = pendingDockClickCount
+    print("[DockMiddleQuit] Dock middle-click \(count) on '\(appName)'")
+
+    pendingDockClickWorkItem?.cancel()
+    let work = DispatchWorkItem {
+        pendingDockClickWorkItem = nil
+        pendingDockClickName = nil
+        pendingDockClickCount = 0
+        switch count {
+        case 1: quitApp(named: appName, mode: .normal)
+        case 2: quitApp(named: appName, mode: .background)
+        default: quitApp(named: appName, mode: .force)
+        }
+    }
+    pendingDockClickWorkItem = work
+    DispatchQueue.main.asyncAfter(deadline: .now() + multiClickWindow, execute: work)
 }
 
 // MARK: - CGEventTap (can swallow)
@@ -588,10 +664,9 @@ func tapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent, refc
     if event.type == .otherMouseDown {
         let btn = event.getIntegerValueField(.mouseEventButtonNumber)
         if btn == middleButton {
-            emulator.noteMiddleClick()
             let loc = event.location
-            if dockAppName(at: loc) != nil {
-                DispatchQueue.main.async { handleMiddleClick(at: loc) }
+            if let name = dockAppName(at: loc) {
+                DispatchQueue.main.async { registerDockMiddleClick(appName: name) }
                 return nil // swallow
             }
         }
@@ -631,7 +706,9 @@ func installGlobalMonitor() {
     NSEvent.addGlobalMonitorForEvents(matching: .otherMouseDown) { e in
         if e.buttonNumber == 2 {
             let pt = NSEvent.mouseLocation
-            handleMiddleClick(at: pt)
+            if let name = dockAppName(at: pt) {
+                registerDockMiddleClick(appName: name)
+            }
         }
     }
     print("[DockMiddleQuit] NSEvent global monitor installed ✓ (passive)")

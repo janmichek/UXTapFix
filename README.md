@@ -49,22 +49,22 @@ and opens the same assistant.
 
 ## What the Setup app does
 
-The assistant is a four-step native SwiftUI app:
+The assistant is a three-step native SwiftUI app:
 
-1. **Welcome** — animated previews of the two main gestures (quit a Dock app,
-   close a browser tab) plus a short summary. Click **Install** to copy
+1. **Welcome** — animated previews of three features (a three-finger trackpad
+   tap synced to a middle click, quitting a Dock app, and the quit → stop →
+   force-quit escalation) plus a short summary. Click **Install** to copy
    `DockMiddleQuit.app` to `~/Applications` and add a per-user LaunchAgent. No
    admin rights, no system-wide changes.
 2. **Permissions** — opens the exact macOS privacy panes and shows permission
    status live, read from the running background service.
 3. **Launch at Login** — confirms the LaunchAgent so the utility is ready every
-   time you log in. You can turn this off at any time.
-4. **Setup Complete** — a short summary of permissions, login, and service
-   health.
+   time you log in. You can turn this off at any time. **Continue** closes the
+   assistant.
 
 The assistant copies itself to `~/Applications/DockMiddleQuit Setup.app`, so
-you can reopen it later to check status, repair permissions, reinstall, view
-the log, or uninstall. The menu in the window toolbar has all of those actions.
+you can reopen it later to review permission status. The toolbar has a **Quit**
+button.
 
 If an old copy exists at `/Applications/DockMiddleQuit.app`, Setup stops it,
 moves it to the Trash, and installs the new per-user build.
@@ -85,9 +85,9 @@ The row updates within a couple of seconds after you flip the switch.
 ### If the switch looks on but status stays off
 
 That usually means the permission belongs to an older build with a different
-code signature. Click **Reset** on the affected row, then **Grant Access**
-again. This clears the stale record with `tccutil` so macOS can add the current
-app.
+code signature. Click **Grant Access** again. While the service is reporting
+live status, Setup clears the stale record with `tccutil` first so macOS can
+add the current app.
 
 The terminal equivalent:
 
@@ -267,12 +267,13 @@ there is no Xcode project.
 Right-click → **Open**, or run `Install DockMiddleQuit.command`.
 
 **Accessibility says granted in System Settings but the app says otherwise.**
-Use **Reset** on the permission row, then **Grant Access** again. Rebuilding
-produces a new ad-hoc signature, so old approvals can be stale.
+Click **Grant Access** again. Rebuilding produces a new ad-hoc signature, so old
+approvals can be stale.
 
-**Middle-click does nothing.** Open the toolbar menu → **Open Log**. Grant
-Accessibility, then use **Restart** on the Launch at Login step. If the log
-mentions `CGEventTap failed`, enable Input Monitoring as well.
+**Middle-click does nothing.** Check `~/Library/Logs/DockMiddleQuit.log`. Grant
+Accessibility, then run
+`~/Library/Application\ Support/DockMiddleQuit/restart.sh`. If the log mentions
+`CGEventTap failed`, enable Input Monitoring as well.
 
 **Three-finger tap does nothing.** Check the log for
 `Three-finger middle-click enabled`. If it says no multitouch device was found,
@@ -291,8 +292,8 @@ middle button. Chrome, Safari, Firefox, Arc, and most other browsers close a
 tab when its tab is middle-clicked.
 
 **The service is stopped.** Open the Launch at Login step and make sure
-**Start DockMiddleQuit when I log in** is on, then click **Restart**. You can
-also run `~/Library/Application\ Support/DockMiddleQuit/restart.sh`.
+**Start DockMiddleQuit when I log in** is on. You can also run
+`~/Library/Application\ Support/DockMiddleQuit/restart.sh`.
 
 **I want to see what it is doing.** Check the live status file:
 
@@ -306,15 +307,14 @@ See `enable-finder-quit.sh` for the advanced rebuild.
 
 ## Uninstall
 
-Open `~/Applications/DockMiddleQuit Setup.app`, use the toolbar menu →
-**Uninstall DockMiddleQuit…**. That stops the service, removes the app, Setup
-app, login item, helper files, log, and privacy records.
-
-Headless equivalent:
+Run the headless uninstaller:
 
 ```sh
 ~/Library/Application\ Support/DockMiddleQuit/uninstall.sh
 ```
+
+That stops the service and removes the app, Setup app, login item, helper
+files, log, and privacy records.
 
 The project is ad-hoc signed and not notarized. It requests no network access
 and stores nothing beyond the local status/log files listed above.

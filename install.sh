@@ -67,7 +67,7 @@ if [[ "$mode" == "guided" ]]; then
     open "$SETUP_APP"
     echo ""
     echo "DockMiddleQuit Setup is opening. Follow the short steps:"
-    echo "  Welcome -> Permissions -> Launch at Login -> Setup Complete"
+    echo "  Welcome -> Permissions -> Launch at Login"
     exit 0
 fi
 
@@ -155,6 +155,6 @@ echo "  open 'x-apple.systempreferences:com.apple.preference.security?Privacy_Ac
 echo "  open 'x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent'"
 echo ""
 echo "If the permission switch already looks on but the app still reports false,"
-echo "click Reset in the Setup app's permission row, then Grant Access again."
+echo "click Grant Access again in the Setup app. It clears the stale record first."
 echo ""
 echo "Check the service with: $SUPPORT/status.sh"

@@ -80,7 +80,6 @@ enum SnapshotSupport {
         case "welcome": return .welcome
         case "permissions", "access": return .permissions
         case "login": return .login
-        case "done", "ready": return .done
         default: return nil
         }
     }
@@ -113,30 +112,13 @@ struct SetupRootView: View {
             .background(Color(nsColor: .windowBackgroundColor))
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    Menu {
-                        Button("Run Setup Again") { model.step = .welcome }
-                        if model.installed {
-                            Button("Reinstall DockMiddleQuit…") {
-                                model.step = .welcome
-                                Task { await model.install() }
-                            }
-                        }
-                        Divider()
-                        Button("Open Log") { model.openLog() }
-                            .disabled(!model.installed)
-                        Button("Show DockMiddleQuit in Finder") { model.revealApp() }
-                            .disabled(!model.installed)
-                        Divider()
-                        Button("Uninstall DockMiddleQuit…") {
-                            model.showUninstallConfirmation = true
-                        }
-                        .disabled(!model.installed)
-                        Button("Quit Setup") { NSApp.terminate(nil) }
+                    Button {
+                        NSApp.terminate(nil)
                     } label: {
-                        Image(systemName: "gearshape")
+                        Image(systemName: "xmark")
                     }
-                    .disabled(model.busy)
-                    .help("DockMiddleQuit options")
+                    .keyboardShortcut("q")
+                    .help("Quit Setup")
                 }
             }
             .onAppear {
@@ -146,13 +128,8 @@ struct SetupRootView: View {
                 }
                 if SnapshotSupport.previewPermissionsMissing {
                     model.status = DaemonStatus(
-                        version: nil,
                         accessibility: false,
                         inputMonitoring: false,
-                        eventTapActive: false,
-                        middleClickEmulation: false,
-                        middleClickEnabled: false,
-                        middleClickFingers: 3,
                         updatedAt: Date()
                     )
                 }
@@ -164,14 +141,6 @@ struct SetupRootView: View {
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                 guard SnapshotSupport.outputPath == nil else { return }
                 model.refresh()
-            }
-            .alert("Uninstall DockMiddleQuit?", isPresented: $model.showUninstallConfirmation) {
-                Button("Uninstall", role: .destructive) {
-                    Task { await model.uninstall() }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("This removes the app, the login item, helper files, and its privacy permissions. You can reinstall anytime.")
             }
             .alert("Something went wrong", isPresented: errorBinding) {
                 Button("OK") { model.errorMessage = nil }
@@ -189,8 +158,6 @@ struct SetupRootView: View {
             PermissionsView(model: model)
         case .login:
             LoginView(model: model)
-        case .done:
-            DoneView(model: model)
         }
     }
 
@@ -223,20 +190,6 @@ struct WelcomeView: View {
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-
-                    LazyVGrid(
-                        columns: [
-                            GridItem(.flexible(), alignment: .leading),
-                            GridItem(.flexible(), alignment: .leading)
-                        ],
-                        alignment: .leading,
-                        spacing: 6
-                    ) {
-                        Label("Opens links in a background tab", systemImage: "link")
-                        Label("Three-finger tap on the trackpad", systemImage: "hand.tap")
-                        Label("Starts automatically at login", systemImage: "power")
-                    }
-                    .font(.callout)
 
                     if model.installed {
                         Notice(text: "DockMiddleQuit is already installed. Continue to review its permissions.")
@@ -322,9 +275,7 @@ struct PermissionsView: View {
                                 kind: .accessibility,
                                 granted: model.accessibilityGranted,
                                 waiting: model.requestedPermission == .accessibility,
-                                onGrant: { model.requestPermission(.accessibility) },
-                                onOpenSettings: { model.openPermissionSettings(.accessibility) },
-                                onReset: { model.resetPermission(.accessibility) }
+                                onGrant: { model.requestPermission(.accessibility) }
                             )
 
                             Divider()
@@ -333,23 +284,15 @@ struct PermissionsView: View {
                                 kind: .inputMonitoring,
                                 granted: model.inputMonitoringGranted,
                                 waiting: model.requestedPermission == .inputMonitoring,
-                                onGrant: { model.requestPermission(.inputMonitoring) },
-                                onOpenSettings: { model.openPermissionSettings(.inputMonitoring) },
-                                onReset: { model.resetPermission(.inputMonitoring) }
+                                onGrant: { model.requestPermission(.inputMonitoring) }
                             )
                         }
                         .padding(.vertical, 2)
                     }
 
-                    HStack(spacing: 8) {
-                        Text("Status updates automatically when you return from System Settings.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Button("Check Again") { model.refresh() }
-                            .buttonStyle(.link)
-                            .controlSize(.small)
-                    }
+                    Text("Status updates automatically when you return from System Settings.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 .padding(SetupStyle.padding)
             }
@@ -381,8 +324,6 @@ struct PermissionRow: View {
     let granted: Bool
     let waiting: Bool
     let onGrant: () -> Void
-    let onOpenSettings: () -> Void
-    let onReset: () -> Void
 
     private var statusKind: StatusLabel.Kind {
         if granted { return .granted }
@@ -418,10 +359,6 @@ struct PermissionRow: View {
                     HStack(spacing: 8) {
                         Button(waiting ? "Waiting…" : "Grant Access", action: onGrant)
                             .disabled(waiting)
-                        Button("Settings", action: onOpenSettings)
-                        Button("Reset", action: onReset)
-                            .buttonStyle(.link)
-                            .help("Clear a stale macOS permission record, then grant access again.")
                         Spacer()
                     }
                     .controlSize(.small)
@@ -461,20 +398,8 @@ struct LoginView: View {
                             Text("Runs quietly in the background and restarts if it stops.")
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
-
-                            Divider()
-
-                            HStack(spacing: 8) {
-                                StatusLabel(
-                                    text: model.serviceRunning ? "Background service running" : "Background service stopped",
-                                    kind: model.serviceRunning ? .granted : .problem
-                                )
-                                Spacer()
-                                Button("Restart") { model.restartService() }
-                                    .controlSize(.small)
-                                    .disabled(!model.launchAtLogin)
-                            }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, 2)
                     }
 
@@ -511,116 +436,6 @@ struct LoginView: View {
                 Button("Back") { model.goBack() }
                 Spacer()
                 Button("Continue") { model.goNext() }
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut(.defaultAction)
-            }
-        }
-    }
-}
-
-// MARK: - Done
-
-struct DoneView: View {
-    @ObservedObject var model: SetupModel
-
-    var body: some View {
-        VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    HStack(alignment: .center, spacing: 10) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.title)
-                            .foregroundStyle(.green)
-                        StepHeader(
-                            title: "Setup Complete",
-                            subtitle: "Middle-click any Dock icon to quit its app. Middle-click a browser tab to close it."
-                        )
-                    }
-
-                    if !model.accessibilityGranted {
-                        Notice(
-                            text: "Accessibility is still off, so DockMiddleQuit can't see Dock icons yet.",
-                            kind: .warning,
-                            actionTitle: "Fix",
-                            action: { model.step = .permissions }
-                        )
-                    } else if !model.serviceRunning {
-                        Notice(
-                            text: "The background service is stopped.",
-                            kind: .warning,
-                            actionTitle: "Manage",
-                            action: { model.step = .login }
-                        )
-                    }
-
-                    if model.legacyLoginItemPresent {
-                        Notice(
-                            text: "macOS still lists the old DockMiddleQuit login item. Remove it in Login Items to avoid a duplicate launch.",
-                            kind: .warning,
-                            actionTitle: "Login Items",
-                            action: { model.openLoginItemsSettings() }
-                        )
-                    }
-
-                    if model.middleClickAppRunning {
-                        Notice(
-                            text: "MiddleClick is still running and will add a second middle click to each gesture.",
-                            kind: .warning,
-                            actionTitle: "Quit MiddleClick",
-                            action: { model.quitMiddleClick() }
-                        )
-                    }
-
-                    GroupBox {
-                        VStack(spacing: 10) {
-                            SummaryRow(
-                                title: "Accessibility",
-                                value: model.accessibilityGranted ? "Granted" : "Needs approval",
-                                kind: model.accessibilityGranted ? .granted : .required
-                            )
-                            Divider()
-                            SummaryRow(
-                                title: "Input Monitoring",
-                                value: model.inputMonitoringGranted ? "Granted" : "Not granted",
-                                kind: model.inputMonitoringGranted ? .granted : .optional
-                            )
-                            Divider()
-                            SummaryRow(
-                                title: "Three-finger middle click",
-                                value: model.middleClickEmulationActive
-                                    ? "On (\(model.middleClickFingers) fingers)"
-                                    : (model.middleClickConfigured ? "Unavailable" : "Off"),
-                                kind: model.middleClickEmulationActive ? .granted : .optional
-                            )
-                            Divider()
-                            SummaryRow(
-                                title: "Launch at Login",
-                                value: model.launchAtLogin ? "On" : "Off",
-                                kind: model.launchAtLogin ? .granted : .optional
-                            )
-                            Divider()
-                            SummaryRow(
-                                title: "Background Service",
-                                value: model.serviceRunning ? "Running" : "Stopped",
-                                kind: model.serviceRunning ? .granted : .problem
-                            )
-                        }
-                        .padding(.vertical, 2)
-                    }
-
-                    Text("You can reopen DockMiddleQuit Setup from your Applications folder anytime.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(SetupStyle.padding)
-            }
-            .scrollIndicators(.hidden)
-
-            SetupFooter {
-                Button("Open Log") { model.openLog() }
-                    .disabled(!model.installed)
-                Spacer()
-                Button("Done") { NSApp.terminate(nil) }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
             }

@@ -1,6 +1,6 @@
 //
 //  MultitouchSupport.h
-//  DockMiddleQuit
+//  UXTapFix
 //
 //  Minimal declarations for the private MultitouchSupport.framework.
 //  The framework has no public header. The struct layout and function
@@ -65,4 +65,4 @@ void MTDeviceStart(MTDeviceRef, int runMode) CF_SWIFT_NAME(MTDevice.start(self:r
 void MTDeviceStop(MTDeviceRef) CF_SWIFT_NAME(MTDevice.stop(self:));
 
 // MTDeviceCreateList is intentionally not declared here: it is resolved
-// with @_silgen_name in DockMiddleQuit.swift.
+// with @_silgen_name in UXTapFix.swift.

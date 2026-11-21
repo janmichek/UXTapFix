@@ -6,17 +6,17 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 DIST="$ROOT/dist"
 STAGE="$ROOT/build/dmg"
-SETUP_APP="$DIST/DockMiddleQuit Setup.app"
+SETUP_APP="$DIST/UXTapFix Setup.app"
 VERSION="$(plutil -extract CFBundleShortVersionString raw "$ROOT/bundle/Setup-Info.plist")"
-DMG="$DIST/DockMiddleQuit-$VERSION.dmg"
+DMG="$DIST/UXTapFix-$VERSION.dmg"
 
 "$ROOT/build.sh" "$DIST"
 
 rm -rf "$STAGE"
 mkdir -p "$STAGE"
-ditto "$SETUP_APP" "$STAGE/DockMiddleQuit Setup.app"
-cp "$ROOT/Install DockMiddleQuit.command" "$STAGE/Install DockMiddleQuit.command"
-chmod +x "$STAGE/Install DockMiddleQuit.command"
+ditto "$SETUP_APP" "$STAGE/UXTapFix Setup.app"
+cp "$ROOT/Install UXTapFix.command" "$STAGE/Install UXTapFix.command"
+chmod +x "$STAGE/Install UXTapFix.command"
 
 if [[ -f "$ROOT/build/AppIcon.icns" ]]; then
     cp "$ROOT/build/AppIcon.icns" "$STAGE/.VolumeIcon.icns"
@@ -26,14 +26,14 @@ if [[ -f "$ROOT/build/AppIcon.icns" ]]; then
 fi
 
 cat > "$STAGE/Read Me.txt" <<'README'
-DockMiddleQuit
+UXTapFix
 ==============
 
 Middle-click (or three-finger tap) a Dock icon to quit that app.
 
 INSTALL
 -------
-1. Open "DockMiddleQuit Setup.app".
+1. Open "UXTapFix Setup.app".
    If macOS says it can't verify the app, right-click it and choose Open.
    That warning appears because this build is ad-hoc signed, not notarized.
 
@@ -41,10 +41,10 @@ INSTALL
    Welcome -> Permissions -> Launch at Login.
 
    No admin password is needed. The app is installed in your user folder:
-   ~/Applications/DockMiddleQuit.app
+   ~/Applications/UXTapFix.app
 
 If double-clicking the Setup app is blocked, double-click
-"Install DockMiddleQuit.command" instead. It clears the download quarantine
+"Install UXTapFix.command" instead. It clears the download quarantine
 flag and opens the same assistant.
 
 PERMISSIONS
@@ -59,7 +59,7 @@ Access again. Setup clears the old entry left behind by a previous build.
 
 THREE-FINGER TAP
 ----------------
-DockMiddleQuit turns a three-finger trackpad tap (or a physical click with
+UXTapFix turns a three-finger trackpad tap (or a physical click with
 three fingers down) into a real middle click:
 
   Dock icon     -> the app quits
@@ -81,7 +81,7 @@ UNINSTALL
 ---------
 Run the headless uninstaller:
 
-  ~/Library/Application Support/DockMiddleQuit/uninstall.sh
+  ~/Library/Application Support/UXTapFix/uninstall.sh
 
 That removes the app, Setup app, login item, helper files, and privacy
 permissions.
@@ -93,13 +93,13 @@ rm -f "$DMG"
 if diskutil image create from --help >/dev/null 2>&1 \
     && diskutil image create from \
         --format UDZO \
-        --volumeName "DockMiddleQuit $VERSION" \
+        --volumeName "UXTapFix $VERSION" \
         "$STAGE" "$DMG" >/dev/null 2>&1; then
     : # Newer macOS releases deprecate hdiutil.
 else
     rm -f "$DMG"
     hdiutil create \
-        -volname "DockMiddleQuit $VERSION" \
+        -volname "UXTapFix $VERSION" \
         -srcfolder "$STAGE" \
         -ov \
         -format UDZO \

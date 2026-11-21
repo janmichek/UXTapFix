@@ -1,4 +1,4 @@
-// DockMiddleQuit v2.3
+// UXTapFix v2.3
 // Middle-click (button 2) a Dock icon to quit that app.
 // Also turns a three-finger trackpad tap/click into a middle click, so the
 // same gesture closes a browser tab outside the Dock.
@@ -16,10 +16,10 @@ setlinebuf(stdout)
 
 let appVersion = "2.3"
 let supportDirectory = FileManager.default.homeDirectoryForCurrentUser
-    .appendingPathComponent("Library/Application Support/DockMiddleQuit", isDirectory: true)
+    .appendingPathComponent("Library/Application Support/UXTapFix", isDirectory: true)
 let statusFileURL = supportDirectory.appendingPathComponent("status.json")
 let logFileURL = FileManager.default.homeDirectoryForCurrentUser
-    .appendingPathComponent("Library/Logs/DockMiddleQuit.log")
+    .appendingPathComponent("Library/Logs/UXTapFix.log")
 
 let startedAt = Date().timeIntervalSince1970
 var lastQuitName: String?
@@ -31,9 +31,9 @@ var reportedStatusWriteFailure = false
 // This uses the private MultitouchSupport.framework, the same undocumented
 // interface used by MiddleClick. It is not App Store compatible and Apple may
 // change it in any macOS release. If the framework is unavailable, the rest of
-// DockMiddleQuit keeps working and only the trackpad shortcut is lost.
+// UXTapFix keeps working and only the trackpad shortcut is lost.
 //
-// Configure with UserDefaults (domain com.user.dockmiddlequit):
+// Configure with UserDefaults (domain com.user.uxtapfix):
 //   middleClickEmulation        Bool    default true
 //   middleClickFingers          Int     default 3
 //   middleClickAllowMoreFingers Bool    default false
@@ -41,7 +41,8 @@ var reportedStatusWriteFailure = false
 //   middleClickMaxTimeDelta     Double  default 300 (milliseconds)
 //   middleClickMaxDistanceDelta Double  default 0.05 (normalized units)
 //   middleClickMultiAction      Bool    default true
-//   middleClickMultiClickWindow Double  default 300 (milliseconds, minimum 150)
+//   middleClickMultiClickWindow Double  default: system double-click interval
+//                                       (minimum 500 milliseconds, can be overridden; floor 150)
 
 @_silgen_name("MTDeviceCreateList")
 private func MTDeviceCreateList() -> Unmanaged<CFMutableArray>?
@@ -108,7 +109,7 @@ final class MiddleClickEmulator {
     @discardableResult
     func start() -> Bool {
         guard enabled else {
-            print("[DockMiddleQuit] Three-finger middle-click disabled by preference.")
+            print("[UXTapFix] Three-finger middle-click disabled by preference.")
             return false
         }
 
@@ -150,7 +151,7 @@ final class MiddleClickEmulator {
         guard !list.isEmpty else {
             if !loggedRegistrationFailure {
                 loggedRegistrationFailure = true
-                print("[DockMiddleQuit] No multitouch device found yet; will keep trying.")
+                print("[UXTapFix] No multitouch device found yet; will keep trying.")
             }
             return false
         }
@@ -168,7 +169,7 @@ final class MiddleClickEmulator {
         }
 
         guard registeredCount > 0 else {
-            print("[DockMiddleQuit] Could not register a multitouch callback; will keep trying.")
+            print("[UXTapFix] Could not register a multitouch callback; will keep trying.")
             lock.lock()
             devices.removeAll()
             lock.unlock()
@@ -178,7 +179,7 @@ final class MiddleClickEmulator {
         retryTimer?.invalidate()
         retryTimer = nil
         loggedRegistrationFailure = false
-        print("[DockMiddleQuit] Three-finger middle-click enabled ✓ (\(fingerCount) fingers)")
+        print("[UXTapFix] Three-finger middle-click enabled ✓ (\(fingerCount) fingers)")
         return true
     }
 
@@ -200,7 +201,7 @@ final class MiddleClickEmulator {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            print("[DockMiddleQuit] System woke; reconnecting trackpad.")
+            print("[UXTapFix] System woke; reconnecting trackpad.")
             self?.restart()
         }
     }
@@ -400,7 +401,7 @@ func writeStatus() {
     } catch {
         if !reportedStatusWriteFailure {
             reportedStatusWriteFailure = true
-            print("[DockMiddleQuit] Could not write status file: \(error.localizedDescription)")
+            print("[UXTapFix] Could not write status file: \(error.localizedDescription)")
         }
     }
 }
@@ -431,12 +432,12 @@ if CommandLine.arguments.contains("--check") {
 }
 
 if CommandLine.arguments.contains("--request-accessibility") {
-    print("[DockMiddleQuit] Requesting Accessibility access…")
+    print("[UXTapFix] Requesting Accessibility access…")
     let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
     let alreadyGranted = AXIsProcessTrustedWithOptions(options)
     print(alreadyGranted
-          ? "[DockMiddleQuit] Accessibility already granted ✓"
-          : "[DockMiddleQuit] Waiting for Accessibility approval…")
+          ? "[UXTapFix] Accessibility already granted ✓"
+          : "[UXTapFix] Waiting for Accessibility approval…")
     // Give the system prompt a moment to remain on screen before this helper exits.
     RunLoop.main.run(until: Date().addingTimeInterval(alreadyGranted ? 0.2 : 4.0))
     exit(alreadyGranted ? 0 : 2)
@@ -445,12 +446,12 @@ if CommandLine.arguments.contains("--request-accessibility") {
 if CommandLine.arguments.contains("--request-input-monitoring") {
     let alreadyGranted = inputMonitoringGranted()
     if !alreadyGranted {
-        print("[DockMiddleQuit] Requesting Input Monitoring access…")
+        print("[UXTapFix] Requesting Input Monitoring access…")
         _ = CGRequestListenEventAccess()
     }
     print(inputMonitoringGranted()
-          ? "[DockMiddleQuit] Input Monitoring granted ✓"
-          : "[DockMiddleQuit] Input Monitoring not granted (optional)")
+          ? "[UXTapFix] Input Monitoring granted ✓"
+          : "[UXTapFix] Input Monitoring not granted (optional)")
     RunLoop.main.run(until: Date().addingTimeInterval(1.0))
     exit(inputMonitoringGranted() ? 0 : 2)
 }
@@ -462,9 +463,9 @@ if CommandLine.arguments.contains("--request-input-monitoring") {
 if CommandLine.arguments.contains("--unregister-login-item") {
     do {
         try SMAppService.mainApp.unregister()
-        print("[DockMiddleQuit] Removed the legacy main-app login item.")
+        print("[UXTapFix] Removed the legacy main-app login item.")
     } catch {
-        print("[DockMiddleQuit] No legacy main-app login item removed: \(error.localizedDescription)")
+        print("[UXTapFix] No legacy main-app login item removed: \(error.localizedDescription)")
     }
     exit(0)
 }
@@ -474,29 +475,90 @@ if CommandLine.arguments.contains("--unregister-login-item") {
 func ensureTrusted() -> Bool {
     let trusted = accessibilityGranted()
     if !trusted {
-        print("[DockMiddleQuit] ⚠️ Accessibility NOT granted.")
-        print("   Open DockMiddleQuit Setup and follow the permission steps, or add")
+        print("[UXTapFix] ⚠️ Accessibility NOT granted.")
+        print("   Open UXTapFix Setup and follow the permission steps, or add")
         print("   \(Bundle.main.bundlePath) in System Settings -> Privacy & Security -> Accessibility.")
     } else {
-        print("[DockMiddleQuit] Accessibility trusted ✓")
+        print("[UXTapFix] Accessibility trusted ✓")
     }
     return trusted
 }
 
-func dockAppName(at point: CGPoint) -> String? {
+struct DockItem {
+    let name: String
+    let url: URL?
+}
+
+func axAttribute(_ element: AXUIElement, _ attribute: String) -> AnyObject? {
+    var value: AnyObject?
+    guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else { return nil }
+    return value
+}
+
+func dockItem(at point: CGPoint) -> DockItem? {
     let sys = AXUIElementCreateSystemWide()
     var el: AXUIElement?
     let err = AXUIElementCopyElementAtPosition(sys, Float(point.x), Float(point.y), &el)
     guard err == .success, let element = el else { return nil }
-    var role: AnyObject?
-    AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
-    guard let r = role as? String, r == "AXDockItem" else { return nil }
-    var title: AnyObject?
-    AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &title)
-    if let t = title as? String, !t.isEmpty { return t }
-    var desc: AnyObject?
-    AXUIElementCopyAttributeValue(element, kAXDescriptionAttribute as CFString, &desc)
-    return desc as? String
+    guard axAttribute(element, kAXRoleAttribute) as? String == "AXDockItem" else { return nil }
+
+    // AXURL identifies the bundle the tile points at. It is more reliable than
+    // the title: Ableton, for example, shows "Ableton Live 12 Suite" in the Dock
+    // while NSRunningApplication.localizedName is just "Live".
+    let rawURL = axAttribute(element, "AXURL")
+    let url = (rawURL as? URL) ?? (rawURL as? String).flatMap(URL.init(string:))
+
+    var name = axAttribute(element, kAXTitleAttribute) as? String
+    if name?.isEmpty != false { name = axAttribute(element, kAXDescriptionAttribute) as? String }
+    if name?.isEmpty != false { name = url?.deletingPathExtension().lastPathComponent }
+    guard let name, !name.isEmpty else { return nil }
+    return DockItem(name: name, url: url)
+}
+
+func normalizedBundlePath(_ url: URL) -> String {
+    var path = url.resolvingSymlinksInPath().standardizedFileURL.path
+    while path.count > 1 && path.hasSuffix("/") { path.removeLast() }
+    return path
+}
+
+func runningApp(named name: String, url: URL?) -> NSRunningApplication? {
+    let apps = NSWorkspace.shared.runningApplications
+
+    // Prefer the Dock tile's bundle over any name comparison. Bundle ID first
+    // because the app may have been moved since the Dock tile was created, then
+    // the resolved path for bundles without a readable Info.plist.
+    if let url {
+        if let bundleID = Bundle(url: url)?.bundleIdentifier, !bundleID.isEmpty,
+           let match = apps.first(where: { $0.bundleIdentifier == bundleID }) {
+            return match
+        }
+        let targetPath = normalizedBundlePath(url)
+        if let match = apps.first(where: { app in
+            guard let bundleURL = app.bundleURL else { return false }
+            return normalizedBundlePath(bundleURL) == targetPath
+        }) {
+            return match
+        }
+    }
+
+    if let exact = apps.first(where: { $0.localizedName == name }) { return exact }
+
+    // Last resort: match the bundle or executable filename. Dock titles often
+    // carry more words than localizedName ("Ableton Live 12 Suite" vs "Live").
+    let target = name.lowercased()
+    return apps.first { app in
+        var candidates: [String] = []
+        if let bundleName = app.bundleURL?.deletingPathExtension().lastPathComponent {
+            candidates.append(bundleName)
+        }
+        if let executable = app.executableURL?.lastPathComponent {
+            candidates.append(executable)
+        }
+        if let lastComponent = app.bundleIdentifier?.split(separator: ".").last {
+            candidates.append(String(lastComponent))
+        }
+        return candidates.contains { $0.lowercased() == target }
+    }
 }
 
 func isBlacklisted(_ name: String) -> Bool {
@@ -534,42 +596,42 @@ func scheduleForceTerminate(_ apps: [NSRunningApplication], after delay: TimeInt
     }
 }
 
-func quitApp(named name: String, mode: QuitMode = .normal) {
+func quitApp(named name: String, url: URL? = nil, mode: QuitMode = .normal) {
     if isBlacklisted(name) {
-        print("[DockMiddleQuit] Ignoring blacklisted '\(name)'")
+        print("[UXTapFix] Ignoring blacklisted '\(name)'")
         return
     }
     let apps = NSWorkspace.shared.runningApplications
-    if let app = apps.first(where: { $0.localizedName == name }) {
+    if let app = runningApp(named: name, url: url) {
         lastQuitName = name
         lastQuitAt = Date().timeIntervalSince1970
         writeStatus()
         switch mode {
         case .normal:
-            print("[DockMiddleQuit] Quitting '\(name)' pid \(app.processIdentifier)")
+            print("[UXTapFix] Quitting '\(name)' pid \(app.processIdentifier)")
             if !app.terminate() {
-                print("[DockMiddleQuit] terminate() false, retry forceTerminate in 1.2s")
+                print("[UXTapFix] terminate() false, retry forceTerminate in 1.2s")
                 scheduleForceTerminate([app], after: 1.2)
             }
         case .background:
             let helpers = backgroundHelpers(of: app)
-            print("[DockMiddleQuit] Quitting '\(name)' pid \(app.processIdentifier) and \(helpers.count) background process(es)")
+            print("[UXTapFix] Quitting '\(name)' pid \(app.processIdentifier) and \(helpers.count) background process(es)")
             _ = app.terminate()
             for helper in helpers { _ = helper.terminate() }
             scheduleForceTerminate([app] + helpers, after: 1.2)
         case .force:
             let helpers = backgroundHelpers(of: app)
-            print("[DockMiddleQuit] Force quitting '\(name)' pid \(app.processIdentifier) and \(helpers.count) background process(es)")
+            print("[UXTapFix] Force quitting '\(name)' pid \(app.processIdentifier) and \(helpers.count) background process(es)")
             app.forceTerminate()
             for helper in helpers { helper.forceTerminate() }
         }
         return
     }
     if case .force = mode {
-        print("[DockMiddleQuit] No running app for '\(name)' to force quit")
+        print("[UXTapFix] No running app for '\(name)' to force quit")
         return
     }
-    print("[DockMiddleQuit] No NSRunningApp for '\(name)', trying AppleScript")
+    print("[UXTapFix] No NSRunningApp for '\(name)', trying AppleScript")
     lastQuitName = name
     lastQuitAt = Date().timeIntervalSince1970
     writeStatus()
@@ -577,11 +639,11 @@ func quitApp(named name: String, mode: QuitMode = .normal) {
     var err: NSDictionary?
     if let sc = NSAppleScript(source: src) {
         sc.executeAndReturnError(&err)
-        if let e = err { print("[DockMiddleQuit] AppleScript error \(e)") }
-        else { print("[DockMiddleQuit] AppleScript quit sent to '\(name)'") }
+        if let e = err { print("[UXTapFix] AppleScript error \(e)") }
+        else { print("[UXTapFix] AppleScript quit sent to '\(name)'") }
     }
     if let byBundle = apps.first(where: { ($0.bundleIdentifier ?? "").lowercased().contains(name.lowercased()) }) {
-        print("[DockMiddleQuit] Fuzzy bundle match \(String(describing: byBundle.bundleIdentifier)) -> terminate")
+        print("[UXTapFix] Fuzzy bundle match \(String(describing: byBundle.bundleIdentifier)) -> terminate")
         _ = byBundle.terminate()
     }
 }
@@ -589,25 +651,30 @@ func quitApp(named name: String, mode: QuitMode = .normal) {
 // MARK: - Event handling (shared)
 
 // Repeated middle-clicks on one Dock icon escalate: 1 = quit, 2 = quit the
-// app and its helpers, 3 = force quit. Clicks are counted in a short window so
-// that a single click keeps its usual meaning.
+// app and its helpers, 3 = force quit. Clicks are counted while each follows
+// the previous one within the double-click window, so a single click keeps its
+// usual meaning.
 let multiClickEnabled: Bool = UserDefaults.standard.object(forKey: "middleClickMultiAction") == nil
     ? true
     : UserDefaults.standard.bool(forKey: "middleClickMultiAction")
-let multiClickWindow: TimeInterval = max(
-    0.15,
-    (UserDefaults.standard.object(forKey: "middleClickMultiClickWindow") == nil
-        ? 300
-        : UserDefaults.standard.double(forKey: "middleClickMultiClickWindow")) / 1000
-)
+// Match the system's double-click speed so deliberate triple-clicks with a
+// real mouse count too. Three-finger taps are faster, but physical
+// middle-clicks commonly land 300–500 ms apart, and the old fixed 300 ms
+// window let the first click quit the app before the second arrived.
+let multiClickWindow: TimeInterval = {
+    if UserDefaults.standard.object(forKey: "middleClickMultiClickWindow") != nil {
+        return max(0.15, UserDefaults.standard.double(forKey: "middleClickMultiClickWindow") / 1000)
+    }
+    return max(0.5, NSEvent.doubleClickInterval)
+}()
 
 var pendingDockClickCount = 0
 var pendingDockClickName: String?
 var pendingDockClickWorkItem: DispatchWorkItem?
 
-func registerDockMiddleClick(appName: String) {
+func registerDockMiddleClick(appName: String, url: URL?) {
     guard multiClickEnabled else {
-        quitApp(named: appName)
+        quitApp(named: appName, url: url)
         return
     }
     if pendingDockClickName != appName {
@@ -616,18 +683,26 @@ func registerDockMiddleClick(appName: String) {
     }
     pendingDockClickCount = min(pendingDockClickCount + 1, 3)
     let count = pendingDockClickCount
-    print("[DockMiddleQuit] Dock middle-click \(count) on '\(appName)'")
+    print("[UXTapFix] Dock middle-click \(count) on '\(appName)'")
 
     pendingDockClickWorkItem?.cancel()
+    pendingDockClickWorkItem = nil
+
+    // There is nothing beyond force quit, so act immediately on the third
+    // click. Waiting for the window to elapse would let continued clicking
+    // postpone the force quit indefinitely.
+    if count >= 3 {
+        pendingDockClickName = nil
+        pendingDockClickCount = 0
+        quitApp(named: appName, url: url, mode: .force)
+        return
+    }
+
     let work = DispatchWorkItem {
         pendingDockClickWorkItem = nil
         pendingDockClickName = nil
         pendingDockClickCount = 0
-        switch count {
-        case 1: quitApp(named: appName, mode: .normal)
-        case 2: quitApp(named: appName, mode: .background)
-        default: quitApp(named: appName, mode: .force)
-        }
+        quitApp(named: appName, url: url, mode: count == 1 ? .normal : .background)
     }
     pendingDockClickWorkItem = work
     DispatchQueue.main.asyncAfter(deadline: .now() + multiClickWindow, execute: work)
@@ -637,6 +712,9 @@ func registerDockMiddleClick(appName: String) {
 
 var eventTap: CFMachPort?
 let middleButton: Int64 = 2
+// True while a middle-button down over the Dock was swallowed; its matching up
+// must be swallowed too so the Dock does not see a half-click.
+var swallowedDockMiddleDown = false
 
 func tapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent, refcon: UnsafeMutableRawPointer?) -> Unmanaged<CGEvent>? {
     if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
@@ -665,10 +743,18 @@ func tapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent, refc
         let btn = event.getIntegerValueField(.mouseEventButtonNumber)
         if btn == middleButton {
             let loc = event.location
-            if let name = dockAppName(at: loc) {
-                DispatchQueue.main.async { registerDockMiddleClick(appName: name) }
+            if let item = dockItem(at: loc) {
+                swallowedDockMiddleDown = true
+                DispatchQueue.main.async { registerDockMiddleClick(appName: item.name, url: item.url) }
                 return nil // swallow
             }
+            swallowedDockMiddleDown = false
+        }
+    } else if event.type == .otherMouseUp {
+        let btn = event.getIntegerValueField(.mouseEventButtonNumber)
+        if btn == middleButton && swallowedDockMiddleDown {
+            swallowedDockMiddleDown = false
+            return nil // swallow the up that belongs to the swallowed down
         }
     }
     return Unmanaged.passUnretained(event)
@@ -676,6 +762,7 @@ func tapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent, refc
 
 func tryInstallEventTap() -> Bool {
     let mask: CGEventMask = (1 << CGEventType.otherMouseDown.rawValue)
+        | (1 << CGEventType.otherMouseUp.rawValue)
         | (1 << CGEventType.leftMouseDown.rawValue)
         | (1 << CGEventType.leftMouseUp.rawValue)
         | (1 << CGEventType.rightMouseDown.rawValue)
@@ -690,66 +777,68 @@ func tryInstallEventTap() -> Bool {
         callback: tapCallback,
         userInfo: nil
     ) else {
-        print("[DockMiddleQuit] CGEventTap failed (Input Monitoring not granted). Falling back to NSEvent global monitor.")
+        print("[UXTapFix] CGEventTap failed (Input Monitoring not granted). Falling back to NSEvent global monitor.")
         return false
     }
     eventTap = tap
     let src = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
     CFRunLoopAddSource(CFRunLoopGetCurrent(), src, .commonModes)
     CGEvent.tapEnable(tap: tap, enable: true)
-    print("[DockMiddleQuit] CGEventTap installed ✓ (will swallow middle-click on Dock)")
+    print("[UXTapFix] CGEventTap installed ✓ (will swallow middle-click on Dock)")
     return true
 }
 
 func installGlobalMonitor() {
     // Passive fallback. Works with only Accessibility, but the Dock menu may flash.
     NSEvent.addGlobalMonitorForEvents(matching: .otherMouseDown) { e in
-        if e.buttonNumber == 2 {
-            let pt = NSEvent.mouseLocation
-            if let name = dockAppName(at: pt) {
-                registerDockMiddleClick(appName: name)
-            }
-        }
+        guard e.buttonNumber == 2 else { return }
+        // Use the event's CG location (top-left origin), not NSEvent.mouseLocation
+        // (bottom-left), so the AX hit test looks at the actual Dock item.
+        let pt = e.cgEvent?.location ?? CGEvent(source: nil)?.location
+        guard let pt, let item = dockItem(at: pt) else { return }
+        DispatchQueue.main.async { registerDockMiddleClick(appName: item.name, url: item.url) }
     }
-    print("[DockMiddleQuit] NSEvent global monitor installed ✓ (passive)")
+    print("[UXTapFix] NSEvent global monitor installed ✓ (passive)")
 }
 
 // MARK: - Main
 
-print("[DockMiddleQuit] Starting v\(appVersion)…")
+print("[UXTapFix] Starting v\(appVersion)…")
 _ = ensureTrusted()
 
 let tapOK = tryInstallEventTap()
-installGlobalMonitor()
 if !tapOK {
-    print("[DockMiddleQuit] Using fallback monitor. Middle-click still works, but the Dock menu may flash briefly.")
+    // Only one handler may register a click: running the passive monitor next
+    // to a working event tap can count the same physical click twice.
+    installGlobalMonitor()
+    print("[UXTapFix] Using fallback monitor. Middle-click still works, but the Dock menu may flash briefly.")
 } else {
-    print("[DockMiddleQuit] Input Monitoring \(inputMonitoringGranted() ? "granted ✓" : "not granted")")
+    print("[UXTapFix] Input Monitoring \(inputMonitoringGranted() ? "granted ✓" : "not granted")")
 }
 
 let middleClickOK = MiddleClickEmulator.shared.start()
 if MiddleClickEmulator.shared.enabled {
     if middleClickOK {
-        print("[DockMiddleQuit] Three-finger tap/click sends a middle click. Middle-click a browser tab to close it.")
+        print("[UXTapFix] Three-finger tap/click sends a middle click. Middle-click a browser tab to close it.")
     } else {
-        print("[DockMiddleQuit] Trackpad support unavailable; middle-click still works with a mouse or another gesture app.")
+        print("[UXTapFix] Trackpad support unavailable; middle-click still works with a mouse or another gesture app.")
     }
 }
 
 if !NSRunningApplication.runningApplications(withBundleIdentifier: "art.ginzburg.MiddleClick").isEmpty {
-    print("[DockMiddleQuit] ⚠️ MiddleClick is also running. Quit it to avoid two middle clicks per three-finger gesture.")
+    print("[UXTapFix] ⚠️ MiddleClick is also running. Quit it to avoid two middle clicks per three-finger gesture.")
 }
 
 startStatusHeartbeat()
-print("[DockMiddleQuit] Ready. Three-finger tap/click a Dock icon to quit; middle-click a browser tab to close it. PID \(getpid())")
-print("[DockMiddleQuit] Log: \(logFileURL.path)")
+print("[UXTapFix] Ready. Three-finger tap/click a Dock icon to quit; middle-click a browser tab to close it. PID \(getpid())")
+print("[UXTapFix] Log: \(logFileURL.path)")
 
 signal(SIGTERM) { _ in
-    print("[DockMiddleQuit] SIGTERM")
+    print("[UXTapFix] SIGTERM")
     exit(0)
 }
 signal(SIGINT) { _ in
-    print("[DockMiddleQuit] SIGINT")
+    print("[UXTapFix] SIGINT")
     exit(0)
 }
 

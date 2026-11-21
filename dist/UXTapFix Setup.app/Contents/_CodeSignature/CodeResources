@@ -8,53 +8,53 @@
 		<data>
 		DO35+HKtdryYU9sRP44Axq1EexA=
 		</data>
-		<key>Resources/DockMiddleQuit.app/Contents/Info.plist</key>
-		<data>
-		03g/+HzNOqHPp/E3TCw2aHHHEUo=
-		</data>
-		<key>Resources/DockMiddleQuit.app/Contents/MacOS/DockMiddleQuit</key>
-		<data>
-		Kpufqq1JhFFtnUMPBzW42TJGvGs=
-		</data>
-		<key>Resources/DockMiddleQuit.app/Contents/Resources/AppIcon.icns</key>
-		<data>
-		DO35+HKtdryYU9sRP44Axq1EexA=
-		</data>
-		<key>Resources/DockMiddleQuit.app/Contents/_CodeSignature/CodeResources</key>
-		<data>
-		UUFqv7hPUHFpCwWYZnYZmbbjs5M=
-		</data>
-		<key>Resources/DockMiddleQuit.swift</key>
-		<data>
-		5bCnK5CQRsbOXRSrE3wher3NCQ8=
-		</data>
 		<key>Resources/MultitouchSupport/MultitouchSupport.h</key>
 		<data>
-		eqfEpH55j24Ywxr6x7haJ+7Cg2E=
+		JL2bnWH/zmu2G8chgzn8wJ7YUEE=
 		</data>
 		<key>Resources/MultitouchSupport/module.modulemap</key>
 		<data>
 		mQSo/cIQErnivK/cbuddVty8ab8=
 		</data>
+		<key>Resources/UXTapFix.app/Contents/Info.plist</key>
+		<data>
+		Ju1oSqkUbd00SkdLxMSW6RpRsSk=
+		</data>
+		<key>Resources/UXTapFix.app/Contents/MacOS/UXTapFix</key>
+		<data>
+		DicmkRcpzSJ1/LGBiQsJ6fc7Hf4=
+		</data>
+		<key>Resources/UXTapFix.app/Contents/Resources/AppIcon.icns</key>
+		<data>
+		DO35+HKtdryYU9sRP44Axq1EexA=
+		</data>
+		<key>Resources/UXTapFix.app/Contents/_CodeSignature/CodeResources</key>
+		<data>
+		UUFqv7hPUHFpCwWYZnYZmbbjs5M=
+		</data>
+		<key>Resources/UXTapFix.swift</key>
+		<data>
+		ICj73IkAN4vXCusPZt4rCbhbmv8=
+		</data>
 		<key>Resources/scripts/README.txt</key>
 		<data>
-		bI2/N/Xi06ARu0NEAxBm5nyS48c=
+		iUdyTZKhPo46zqCZtySNMYZIp04=
 		</data>
 		<key>Resources/scripts/enable-finder-quit.sh</key>
 		<data>
-		x+5a1nPmmbLhpzErtkC5WK9blL0=
+		Zw1bSWH0RJ8FMKIZhS6UsUd8n5o=
 		</data>
 		<key>Resources/scripts/restart.sh</key>
 		<data>
-		5G+5TsYdMVQJQ4safSMUS2IsQfE=
+		ZtGV8cX8m3bNKwGtDy0UoMwYQ20=
 		</data>
 		<key>Resources/scripts/status.sh</key>
 		<data>
-		uqsV3PZG6UipOH/CvFPAkDwNlrg=
+		bJBp/XYtJQ6ZRsHkm4GM+t5qtbI=
 		</data>
 		<key>Resources/scripts/uninstall.sh</key>
 		<data>
-		OobQXKBi20a/prwpQq8UgQCIXkg=
+		I8iqnDWPn3mIyRHzpqAzse1uhXA=
 		</data>
 	</dict>
 	<key>files2</key>
@@ -66,46 +66,11 @@
 			V3E+6zLhg7QgoHAA0cnXTMba887FkICZ/FPQ8EndcYE=
 			</data>
 		</dict>
-		<key>Resources/DockMiddleQuit.app/Contents/Info.plist</key>
-		<dict>
-			<key>hash2</key>
-			<data>
-			R42BwiVRgnuVU4Ffdtfg5s2u+8nIPI6b7PhRkaSWnPw=
-			</data>
-		</dict>
-		<key>Resources/DockMiddleQuit.app/Contents/MacOS/DockMiddleQuit</key>
-		<dict>
-			<key>hash2</key>
-			<data>
-			w6df1UOSHiUg5BZN1k5l/37a6TLgvRlLk/kqkBXfruU=
-			</data>
-		</dict>
-		<key>Resources/DockMiddleQuit.app/Contents/Resources/AppIcon.icns</key>
-		<dict>
-			<key>hash2</key>
-			<data>
-			V3E+6zLhg7QgoHAA0cnXTMba887FkICZ/FPQ8EndcYE=
-			</data>
-		</dict>
-		<key>Resources/DockMiddleQuit.app/Contents/_CodeSignature/CodeResources</key>
-		<dict>
-			<key>hash2</key>
-			<data>
-			wcnm6h6W30dFsk49tJAFr1krEZ538Zj0TQbEwHnJQJk=
-			</data>
-		</dict>
-		<key>Resources/DockMiddleQuit.swift</key>
-		<dict>
-			<key>hash2</key>
-			<data>
-			i/bHu3hpkZiBaurtUiAe2eEhCShVKtqBfQYrUs5lHgU=
-			</data>
-		</dict>
 		<key>Resources/MultitouchSupport/MultitouchSupport.h</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			+a8VpRzn2QEttTTL40ARByt9W5KOkxkHrR5MfqkS87c=
+			U3/pw5OoL60+kVrfsZ2ECYi+yqGO7ygNVxVL0Tuo9gM=
 			</data>
 		</dict>
 		<key>Resources/MultitouchSupport/module.modulemap</key>
@@ -115,39 +80,74 @@
 			Gadxoq9O7oj0qzrlNAkgGii7twf02nT+Eyv5PFnJZGg=
 			</data>
 		</dict>
+		<key>Resources/UXTapFix.app/Contents/Info.plist</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			zEKkgCidGUZpzBWxrtyQgv08/ci1uIo3dk37uxi1A/M=
+			</data>
+		</dict>
+		<key>Resources/UXTapFix.app/Contents/MacOS/UXTapFix</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			85Z7PfvDApYbTkhDMuy3c6COlCSkGrCWhvTgQ2/P4x8=
+			</data>
+		</dict>
+		<key>Resources/UXTapFix.app/Contents/Resources/AppIcon.icns</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			V3E+6zLhg7QgoHAA0cnXTMba887FkICZ/FPQ8EndcYE=
+			</data>
+		</dict>
+		<key>Resources/UXTapFix.app/Contents/_CodeSignature/CodeResources</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			wcnm6h6W30dFsk49tJAFr1krEZ538Zj0TQbEwHnJQJk=
+			</data>
+		</dict>
+		<key>Resources/UXTapFix.swift</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			Any8RHK2OVQD0H0C1r2idwBj/XGs/qYawiUoDSIDGcw=
+			</data>
+		</dict>
 		<key>Resources/scripts/README.txt</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			MIOKt5pU0nEii5pBSU333SBtLKVJibFUM6V3RLPpGJY=
+			wQEjVyltnmlUHnZAqcjz6y+tWIQIIwOOv87SXOCBlnY=
 			</data>
 		</dict>
 		<key>Resources/scripts/enable-finder-quit.sh</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			0JrR9cVPwN1PWBs3yUDosmOxVbfAqgXlD7hyV7PCS6U=
+			VGwYhQni460IgS0bqzBqbjBwnWuQriO6iHYtbJBkCKo=
 			</data>
 		</dict>
 		<key>Resources/scripts/restart.sh</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			0eC9OI53YYOsuKY9NUGuaDk4EUyPGZyWtePAUvrXlFE=
+			CCNAYjovR5Z98fmIovzszkQ2CQaXLhUittPFqRgK55Y=
 			</data>
 		</dict>
 		<key>Resources/scripts/status.sh</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			uqlBj25APha8fJz+vjWWBInTuTBlJr8TRb2qa5ehRc8=
+			NExlxrXb3POP9oITm2WsO8HJjoHibBZkQ0lZiLRWSXI=
 			</data>
 		</dict>
 		<key>Resources/scripts/uninstall.sh</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			yoEsTV72XMvpcU3vD345HHt2Au4zocsBoiz/VRADdPg=
+			5kkmMoH2vt+HfHtF6tPALQiU4SZyfOQHRo7hdHyEx+c=
 			</data>
 		</dict>
 	</dict>

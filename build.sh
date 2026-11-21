@@ -1,18 +1,18 @@
 #!/bin/zsh
-# Build DockMiddleQuit.app and the DockMiddleQuit Setup app.
+# Build UXTapFix.app and the UXTapFix Setup app.
 # Usage: ./build.sh [output-directory]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 OUT="${1:-$ROOT/dist}"
-DAEMON_APP="$OUT/DockMiddleQuit.app"
-SETUP_APP="$OUT/DockMiddleQuit Setup.app"
+DAEMON_APP="$OUT/UXTapFix.app"
+SETUP_APP="$OUT/UXTapFix Setup.app"
 BUILD="$ROOT/build"
 ARCH="$(uname -m)"
 TARGET="$ARCH-apple-macos13.0"
 VERSION="$(plutil -extract CFBundleShortVersionString raw "$ROOT/bundle/Info.plist")"
 
-echo "Building DockMiddleQuit $VERSION -> $OUT"
+echo "Building UXTapFix $VERSION -> $OUT"
 
 # MARK: Icon
 rm -rf "$BUILD/AppIcon.iconset"
@@ -27,8 +27,8 @@ cp "$ROOT/bundle/Info.plist" "$DAEMON_APP/Contents/Info.plist"
 cp "$BUILD/AppIcon.icns" "$DAEMON_APP/Contents/Resources/AppIcon.icns"
 plutil -lint "$DAEMON_APP/Contents/Info.plist" >/dev/null
 
-swiftc "$ROOT/src/DockMiddleQuit.swift" \
-  -o "$DAEMON_APP/Contents/MacOS/DockMiddleQuit" \
+swiftc "$ROOT/src/UXTapFix.swift" \
+  -o "$DAEMON_APP/Contents/MacOS/UXTapFix" \
   -O \
   -target "$TARGET" \
   -I "$ROOT/src/MultitouchSupport" \
@@ -49,13 +49,13 @@ plutil -lint "$SETUP_APP/Contents/Info.plist" >/dev/null
 
 # Embed the daemon and the CLI helpers inside the Setup app so it is
 # self-contained when moved to ~/Applications or a DMG.
-ditto "$DAEMON_APP" "$SETUP_APP/Contents/Resources/DockMiddleQuit.app"
-cp "$ROOT/src/DockMiddleQuit.swift" "$SETUP_APP/Contents/Resources/DockMiddleQuit.swift"
+ditto "$DAEMON_APP" "$SETUP_APP/Contents/Resources/UXTapFix.app"
+cp "$ROOT/src/UXTapFix.swift" "$SETUP_APP/Contents/Resources/UXTapFix.swift"
 ditto "$ROOT/src/MultitouchSupport" "$SETUP_APP/Contents/Resources/MultitouchSupport"
 ditto "$ROOT/scripts" "$SETUP_APP/Contents/Resources/scripts"
 
 swiftc "$ROOT/src/Setup/"*.swift \
-  -o "$SETUP_APP/Contents/MacOS/DockMiddleQuitSetup" \
+  -o "$SETUP_APP/Contents/MacOS/UXTapFixSetup" \
   -O \
   -target "$TARGET" \
   -parse-as-library \

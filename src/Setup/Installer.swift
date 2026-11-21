@@ -56,7 +56,7 @@ final class SetupModel: ObservableObject {
             switch self {
             case .idle: return "Ready to install"
             case .stopping: return "Stopping the old service"
-            case .copying: return "Copying DockMiddleQuit.app"
+            case .copying: return "Copying UXTapFix.app"
             case .registering: return "Adding the login item"
             case .starting: return "Starting the background service"
             case .finished: return "Installed"
@@ -144,18 +144,36 @@ final class SetupModel: ObservableObject {
     private var previousInputMonitoring = false
     private var isCheckingLegacyLoginItem = false
 
-    let label = "com.user.dockmiddlequit"
+    let label = "com.user.uxtapfix"
+
+    // MARK: Previous install cleanup
+    //
+    // The utility shipped under a different name before. Remove that install
+    // during setup so two background services never run side by side. These
+    // identifiers are used for cleanup only and are never shown in the UI.
+
+    private let previousBundleIdentifier = "com.user.dockmiddlequit"
+    private let previousAppName = "DockMiddleQuit"
+
+    private var previousInstallURLs: [URL] {
+        [
+            URL(fileURLWithPath: "/Applications/\(previousAppName).app", isDirectory: true),
+            homeURL.appendingPathComponent("Applications/\(previousAppName).app", isDirectory: true),
+            homeURL.appendingPathComponent("Applications/\(previousAppName) Setup.app", isDirectory: true),
+            homeURL.appendingPathComponent("Library/LaunchAgents/\(previousBundleIdentifier).plist")
+        ]
+    }
 
     // MARK: Paths
 
     var homeURL: URL { fileManager.homeDirectoryForCurrentUser }
 
     var appURL: URL {
-        homeURL.appendingPathComponent("Applications/DockMiddleQuit.app", isDirectory: true)
+        homeURL.appendingPathComponent("Applications/UXTapFix.app", isDirectory: true)
     }
 
     var legacyAppURL: URL {
-        URL(fileURLWithPath: "/Applications/DockMiddleQuit.app", isDirectory: true)
+        URL(fileURLWithPath: "/Applications/UXTapFix.app", isDirectory: true)
     }
 
     var legacyInstalled: Bool {
@@ -163,11 +181,11 @@ final class SetupModel: ObservableObject {
     }
 
     var setupAppURL: URL {
-        homeURL.appendingPathComponent("Applications/DockMiddleQuit Setup.app", isDirectory: true)
+        homeURL.appendingPathComponent("Applications/UXTapFix Setup.app", isDirectory: true)
     }
 
     var supportURL: URL {
-        homeURL.appendingPathComponent("Library/Application Support/DockMiddleQuit", isDirectory: true)
+        homeURL.appendingPathComponent("Library/Application Support/UXTapFix", isDirectory: true)
     }
 
     var launchAgentURL: URL {
@@ -175,7 +193,7 @@ final class SetupModel: ObservableObject {
     }
 
     var logURL: URL {
-        homeURL.appendingPathComponent("Library/Logs/DockMiddleQuit.log")
+        homeURL.appendingPathComponent("Library/Logs/UXTapFix.log")
     }
 
     var statusURL: URL {
@@ -183,7 +201,7 @@ final class SetupModel: ObservableObject {
     }
 
     var daemonBinaryURL: URL {
-        appURL.appendingPathComponent("Contents/MacOS/DockMiddleQuit")
+        appURL.appendingPathComponent("Contents/MacOS/UXTapFix")
     }
 
     var domain: String { "gui/\(getuid())" }
@@ -249,7 +267,7 @@ final class SetupModel: ObservableObject {
         }
 
         restartingService = true
-        infoMessage = "Permission granted. Restarting DockMiddleQuit so it takes effect…"
+        infoMessage = "Permission granted. Restarting UXTapFix so it takes effect…"
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 700_000_000)
             restartService(quiet: true)
@@ -297,6 +315,7 @@ final class SetupModel: ObservableObject {
 
         do {
             _ = stopService()
+            removePreviousInstall()
             stopRunningDaemons()
             try migrateLegacyInstall()
 
@@ -321,7 +340,7 @@ final class SetupModel: ObservableObject {
             try await Task.sleep(nanoseconds: 650_000_000)
             refresh()
             await waitForFreshStatus(timeout: 5.0)
-            infoMessage = "DockMiddleQuit is installed. Grant the permissions below."
+            infoMessage = "UXTapFix is installed. Grant the permissions below."
             step = .permissions
         } catch {
             installPhase = .idle
@@ -343,8 +362,23 @@ final class SetupModel: ObservableObject {
             _ = app.forceTerminate()
         }
         // Catch a daemon launched directly from a path LaunchServices doesn't know.
-        _ = run("/usr/bin/pkill", ["-x", "DockMiddleQuit"])
+        _ = run("/usr/bin/pkill", ["-x", "UXTapFix"])
         usleep(150_000)
+    }
+
+    private func removePreviousInstall() {
+        _ = run("/bin/launchctl", ["bootout", "\(domain)/\(previousBundleIdentifier)"])
+        for app in NSRunningApplication.runningApplications(withBundleIdentifier: previousBundleIdentifier) {
+            _ = app.terminate()
+        }
+        _ = run("/usr/bin/pkill", ["-x", previousAppName])
+
+        for url in previousInstallURLs where fileManager.fileExists(atPath: url.path) {
+            try? fileManager.trashItem(at: url, resultingItemURL: nil)
+        }
+        let previousSupportURL = homeURL
+            .appendingPathComponent("Library/Application Support/\(previousAppName)", isDirectory: true)
+        try? fileManager.removeItem(at: previousSupportURL)
     }
 
     private func migrateLegacyInstall() throws {
@@ -353,7 +387,7 @@ final class SetupModel: ObservableObject {
         do {
             try fileManager.trashItem(at: legacyAppURL, resultingItemURL: nil)
         } catch {
-            throw InstallerError(message: "An older copy of DockMiddleQuit is in /Applications and couldn't be moved to the Trash. Remove it manually, then try again.\n\n\(error.localizedDescription)")
+            throw InstallerError(message: "An older copy of UXTapFix is in /Applications and couldn't be moved to the Trash. Remove it manually, then try again.\n\n\(error.localizedDescription)")
         }
     }
 
@@ -378,7 +412,7 @@ final class SetupModel: ObservableObject {
     nonisolated private static func legacyLoginItemExists() -> Bool {
         let result = runTool("/usr/bin/sfltool", ["dumpbtm"])
         guard result.status == 0 else { return false }
-        let legacyPath = "/Applications/DockMiddleQuit.app"
+        let legacyPath = "/Applications/UXTapFix.app"
         return result.output.split(separator: "\n").contains { rawLine in
             let line = rawLine.trimmingCharacters(in: .whitespaces)
             // Match the BTM app URL or an old launchd entry's executable path.
@@ -398,7 +432,7 @@ final class SetupModel: ObservableObject {
 
     private func copyPayloadApp() throws {
         guard let payload = payloadAppURL else {
-            throw InstallerError(message: "The installer is missing its DockMiddleQuit.app payload. Rebuild the Setup app with ./build.sh and try again.")
+            throw InstallerError(message: "The installer is missing its UXTapFix.app payload. Rebuild the Setup app with ./build.sh and try again.")
         }
         let applications = appURL.deletingLastPathComponent()
         try fileManager.createDirectory(at: applications, withIntermediateDirectories: true)
@@ -415,13 +449,13 @@ final class SetupModel: ObservableObject {
     }
 
     private var payloadAppURL: URL? {
-        if let bundled = Bundle.main.url(forResource: "DockMiddleQuit", withExtension: "app") {
+        if let bundled = Bundle.main.url(forResource: "UXTapFix", withExtension: "app") {
             return bundled
         }
-        // Development fallback: dist/DockMiddleQuit Setup.app -> dist/DockMiddleQuit.app
+        // Development fallback: dist/UXTapFix Setup.app -> dist/UXTapFix.app
         let sibling = Bundle.main.bundleURL
             .deletingLastPathComponent()
-            .appendingPathComponent("DockMiddleQuit.app", isDirectory: true)
+            .appendingPathComponent("UXTapFix.app", isDirectory: true)
         return fileManager.fileExists(atPath: sibling.path) ? sibling : nil
     }
 
@@ -429,10 +463,10 @@ final class SetupModel: ObservableObject {
         guard let resources = Bundle.main.resourceURL else { return }
         try? fileManager.createDirectory(at: supportURL, withIntermediateDirectories: true)
 
-        let source = resources.appendingPathComponent("DockMiddleQuit.swift")
+        let source = resources.appendingPathComponent("UXTapFix.swift")
         if fileManager.fileExists(atPath: source.path) {
-            try? fileManager.removeItem(at: supportURL.appendingPathComponent("DockMiddleQuit.swift"))
-            try? fileManager.copyItem(at: source, to: supportURL.appendingPathComponent("DockMiddleQuit.swift"))
+            try? fileManager.removeItem(at: supportURL.appendingPathComponent("UXTapFix.swift"))
+            try? fileManager.copyItem(at: source, to: supportURL.appendingPathComponent("UXTapFix.swift"))
         }
 
         let headerSource = resources.appendingPathComponent("MultitouchSupport", isDirectory: true)
@@ -541,7 +575,7 @@ final class SetupModel: ObservableObject {
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 700_000_000)
             refresh()
-            infoMessage = "MiddleClick quit. DockMiddleQuit now handles the three-finger gesture."
+            infoMessage = "MiddleClick quit. UXTapFix now handles the three-finger gesture."
         }
     }
 
@@ -553,7 +587,7 @@ final class SetupModel: ObservableObject {
                 try startService()
                 launchAtLogin = true
                 refresh()
-                infoMessage = "DockMiddleQuit will start automatically when you log in."
+                infoMessage = "UXTapFix will start automatically when you log in."
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -561,7 +595,7 @@ final class SetupModel: ObservableObject {
             _ = stopService()
             try? fileManager.removeItem(at: launchAgentURL)
             launchAtLogin = false
-            infoMessage = "DockMiddleQuit won't start at login. You can turn it back on anytime."
+            infoMessage = "UXTapFix won't start at login. You can turn it back on anytime."
         }
     }
 
@@ -579,7 +613,7 @@ final class SetupModel: ObservableObject {
     func requestPermission(_ kind: PermissionKind) {
         guard installed else { return }
         // Old installs (or ad-hoc rebuilds) can leave a stale TCC entry behind:
-        // System Settings shows DockMiddleQuit switched on, but the current app
+        // System Settings shows UXTapFix switched on, but the current app
         // is not actually trusted. Clear the record so macOS adds the current
         // app and shows a real grant prompt. Only do this while the daemon is
         // reporting live status; with a stopped service the last status could

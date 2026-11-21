@@ -1,10 +1,10 @@
 #!/bin/zsh
-# Restart the DockMiddleQuit launchd service and show the newest log lines.
+# Restart the UXTapFix launchd service and show the newest log lines.
 set -u
 
-LOG="$HOME/Library/Logs/DockMiddleQuit.log"
+LOG="$HOME/Library/Logs/UXTapFix.log"
 DOMAIN="gui/$(id -u)"
-LABEL="com.user.dockmiddlequit"
+LABEL="com.user.uxtapfix"
 
 launchctl kickstart -k "$DOMAIN/$LABEL" 2>&1
 sleep 1

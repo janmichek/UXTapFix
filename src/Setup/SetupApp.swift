@@ -3,7 +3,7 @@ import Combine
 import SwiftUI
 
 @main
-struct DockMiddleQuitSetupApp: App {
+struct UXTapFixSetupApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
@@ -25,7 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         DispatchQueue.main.async {
             for window in NSApp.windows {
-                window.title = "DockMiddleQuit Setup"
+                window.title = "UXTapFix Setup"
                 window.center()
             }
         }
@@ -109,7 +109,7 @@ struct SetupRootView: View {
     var body: some View {
         content
             .frame(width: SetupStyle.windowWidth, height: SetupStyle.windowHeight)
-            .background(Color(nsColor: .windowBackgroundColor))
+            .background(SetupColors.canvas)
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
@@ -177,10 +177,12 @@ struct WelcomeView: View {
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: SetupStyle.sectionSpacing) {
+                    StepProgress(current: 0)
+
                     WelcomeHero()
 
-                    HStack(alignment: .top, spacing: 12) {
+                    HStack(alignment: .top, spacing: SetupStyle.itemSpacing) {
                         ForEach(FeaturePreviewKind.allCases) { kind in
                             FeaturePreviewCard(kind: kind)
                         }
@@ -192,7 +194,7 @@ struct WelcomeView: View {
                         .fixedSize(horizontal: false, vertical: true)
 
                     if model.installed {
-                        Notice(text: "DockMiddleQuit is already installed. Continue to review its permissions.")
+                        Notice(text: "UXTapFix is already installed. Continue to review its permissions.")
                     } else if model.hadLegacyInstall {
                         Notice(
                             text: "An older copy in /Applications will be moved to the Trash.",
@@ -200,7 +202,8 @@ struct WelcomeView: View {
                         )
                     }
                 }
-                .padding(SetupStyle.padding)
+                .padding(SetupStyle.contentPadding)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .scrollIndicators(.hidden)
 
@@ -226,6 +229,7 @@ struct WelcomeView: View {
                             Task { await model.install() }
                         }
                     }
+                    .controlSize(.large)
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
                 }
@@ -239,20 +243,25 @@ struct WelcomeView: View {
 struct PermissionsView: View {
     @ObservedObject var model: SetupModel
 
+    private var grantedCount: Int {
+        [model.accessibilityGranted, model.inputMonitoringGranted].filter { $0 }.count
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: SetupStyle.sectionSpacing) {
                     StepHeader(
+                        step: 1,
                         title: "Permissions",
-                        subtitle: "macOS asks for your approval before DockMiddleQuit can see Dock clicks."
+                        subtitle: "macOS asks for your approval before UXTapFix can see Dock clicks."
                     )
 
                     if !model.serviceRunning {
                         Notice(
                             text: model.launchAtLogin
                                 ? "The background service isn't running."
-                                : "DockMiddleQuit isn't running because Launch at Login is off.",
+                                : "UXTapFix isn't running because Launch at Login is off.",
                             kind: .warning,
                             actionTitle: model.launchAtLogin ? "Restart" : "Login",
                             action: {
@@ -269,32 +278,28 @@ struct PermissionsView: View {
                         Notice(text: info)
                     }
 
-                    GroupBox {
-                        VStack(spacing: 12) {
-                            PermissionRow(
-                                kind: .accessibility,
-                                granted: model.accessibilityGranted,
-                                waiting: model.requestedPermission == .accessibility,
-                                onGrant: { model.requestPermission(.accessibility) }
-                            )
+                    VStack(spacing: SetupStyle.itemSpacing) {
+                        PermissionRow(
+                            kind: .accessibility,
+                            granted: model.accessibilityGranted,
+                            waiting: model.requestedPermission == .accessibility,
+                            onGrant: { model.requestPermission(.accessibility) }
+                        )
 
-                            Divider()
-
-                            PermissionRow(
-                                kind: .inputMonitoring,
-                                granted: model.inputMonitoringGranted,
-                                waiting: model.requestedPermission == .inputMonitoring,
-                                onGrant: { model.requestPermission(.inputMonitoring) }
-                            )
-                        }
-                        .padding(.vertical, 2)
+                        PermissionRow(
+                            kind: .inputMonitoring,
+                            granted: model.inputMonitoringGranted,
+                            waiting: model.requestedPermission == .inputMonitoring,
+                            onGrant: { model.requestPermission(.inputMonitoring) }
+                        )
                     }
 
                     Text("Status updates automatically when you return from System Settings.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                .padding(SetupStyle.padding)
+                .padding(SetupStyle.contentPadding)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .scrollIndicators(.hidden)
 
@@ -303,15 +308,15 @@ struct PermissionsView: View {
 
                 Spacer()
 
-                if !model.accessibilityGranted {
-                    Text("Accessibility can be granted later.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                Text("\(grantedCount) of 2 granted")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.trailing, 4)
 
                 Button(model.accessibilityGranted ? "Continue" : "Continue Anyway") {
                     model.goNext()
                 }
+                .controlSize(.large)
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
             }
@@ -325,7 +330,7 @@ struct PermissionRow: View {
     let waiting: Bool
     let onGrant: () -> Void
 
-    private var statusKind: StatusLabel.Kind {
+    private var statusKind: StatusPill.Kind {
         if granted { return .granted }
         return kind.isRequired ? .required : .optional
     }
@@ -336,33 +341,35 @@ struct PermissionRow: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: kind.icon)
-                .font(.system(size: 20))
-                .foregroundStyle(.secondary)
-                .frame(width: 26, height: 26)
+        SetupCard(padding: 16) {
+            HStack(alignment: .top, spacing: 14) {
+                IconTile(systemName: kind.icon)
 
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) {
-                    Text(kind.displayName)
-                        .font(.headline)
-                    Spacer()
-                    StatusLabel(text: statusText, kind: statusKind)
-                }
-
-                Text(kind.summary)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                if !granted {
+                VStack(alignment: .leading, spacing: 7) {
                     HStack(spacing: 8) {
-                        Button(waiting ? "Waiting…" : "Grant Access", action: onGrant)
-                            .disabled(waiting)
-                        Spacer()
+                        Text(kind.displayName)
+                            .font(.headline)
+                        Spacer(minLength: 8)
+                        StatusPill(text: statusText, kind: statusKind)
                     }
-                    .controlSize(.small)
-                    .padding(.top, 2)
+
+                    Text(kind.summary)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if !granted {
+                        Button(action: onGrant) {
+                            HStack(spacing: 5) {
+                                Image(systemName: waiting ? "clock" : "arrow.up.forward.app")
+                                    .font(.system(size: 11, weight: .semibold))
+                                Text(waiting ? "Waiting for approval…" : "Open System Settings")
+                            }
+                        }
+                        .controlSize(.small)
+                        .disabled(waiting)
+                        .padding(.top, 3)
+                    }
                 }
             }
         }
@@ -374,38 +381,67 @@ struct PermissionRow: View {
 struct LoginView: View {
     @ObservedObject var model: SetupModel
 
+    private var grantedCount: Int {
+        [model.accessibilityGranted, model.inputMonitoringGranted].filter { $0 }.count
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: SetupStyle.sectionSpacing) {
                     StepHeader(
+                        step: 2,
                         title: "Launch at Login",
-                        subtitle: "DockMiddleQuit needs to keep running to catch middle clicks."
+                        subtitle: "UXTapFix needs to keep running to catch middle clicks."
                     )
 
                     if let info = model.infoMessage {
                         Notice(text: info)
                     }
 
-                    GroupBox {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Toggle("Start DockMiddleQuit when I log in", isOn: Binding(
+                    SetupCard(padding: 16) {
+                        HStack(spacing: 14) {
+                            IconTile(systemName: "power", tint: model.launchAtLogin ? .accentColor : .secondary)
+
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Start UXTapFix when I log in")
+                                    .font(.headline)
+                                Text("Runs quietly in the background and restarts if it stops.")
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+
+                            Spacer(minLength: 12)
+
+                            Toggle("Start UXTapFix when I log in", isOn: Binding(
                                 get: { model.launchAtLogin },
                                 set: { model.setLaunchAtLogin($0) }
                             ))
-                            .toggleStyle(.checkbox)
-
-                            Text("Runs quietly in the background and restarts if it stops.")
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 2)
+                    }
+
+                    SetupCard(padding: 20) {
+                        VStack(alignment: .leading, spacing: 14) {
+                            HStack(spacing: 10) {
+                                IconTile(systemName: "hand.tap", size: 30)
+                                Text("Try it now")
+                                    .font(.title3.weight(.semibold))
+                            }
+
+                            VStack(alignment: .leading, spacing: 10) {
+                                TipRow(symbol: "macwindow", text: "Tap a browser tab with three fingers to close it.")
+                                TipRow(symbol: "square.grid.2x2", text: "Middle-click a Dock icon to quit the app.")
+                                TipRow(symbol: "bolt", text: "Click the same icon again to force quit.")
+                            }
+                        }
                     }
 
                     if !model.launchAtLogin {
                         Notice(
-                            text: "DockMiddleQuit won't run in the background until you turn this on.",
+                            text: "UXTapFix won't run in the background until you turn this on.",
                             kind: .warning
                         )
                     }
@@ -421,24 +457,44 @@ struct LoginView: View {
 
                     if model.legacyLoginItemPresent {
                         Notice(
-                            text: "macOS still lists the old DockMiddleQuit login item. Remove it in Login Items to avoid a duplicate launch.",
+                            text: "macOS still lists the old UXTapFix login item. Remove it in Login Items to avoid a duplicate launch.",
                             kind: .warning,
                             actionTitle: "Login Items",
                             action: { model.openLoginItemsSettings() }
                         )
                     }
                 }
-                .padding(SetupStyle.padding)
+                .padding(SetupStyle.contentPadding)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .scrollIndicators(.hidden)
 
             SetupFooter {
                 Button("Back") { model.goBack() }
                 Spacer()
-                Button("Continue") { model.goNext() }
+                Button("Finish") { model.goNext() }
+                    .controlSize(.large)
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
             }
+        }
+    }
+}
+
+private struct TipRow: View {
+    let symbol: String
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: symbol)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+            Text(text)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

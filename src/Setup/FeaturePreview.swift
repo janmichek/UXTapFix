@@ -13,20 +13,20 @@ enum FeaturePreviewKind: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .threeFingerTap: return "Three-finger tap = middle click"
-        case .quitDockApp: return "Quit a Dock app"
-        case .multiAction: return "Quit, stop, force quit"
+        case .threeFingerTap: return "Three-finger tap"
+        case .quitDockApp: return "Quit Dock apps"
+        case .multiAction: return "Force quit"
         }
     }
 
     var caption: String {
         switch self {
         case .threeFingerTap:
-            return "Tap the trackpad with three fingers to send a middle click."
+            return "Three-finger tap and middle click are synced."
         case .quitDockApp:
             return "Middle-click a Dock icon and the app quits."
         case .multiAction:
-            return "Repeat the click on the same icon: quit, then stop background helpers and force quit, then force quit immediately."
+            return "Click again to stop background helpers, then force quit."
         }
     }
 
@@ -87,43 +87,109 @@ struct FeatureAnimationClock {
 
 struct WelcomeHero: View {
     var body: some View {
-        HStack(alignment: .center, spacing: 16) {
+        HStack(alignment: .center, spacing: 20) {
             Image(nsImage: NSApp.applicationIconImage)
                 .resizable()
                 .interpolation(.high)
                 .frame(width: SetupStyle.iconSize, height: SetupStyle.iconSize)
-                .shadow(color: .black.opacity(0.18), radius: 6, y: 3)
+                .background(
+                    Circle()
+                        .fill(Color.accentColor.opacity(0.26))
+                        .blur(radius: 18)
+                )
+                .shadow(color: .black.opacity(0.22), radius: 9, y: 4)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("DockMiddleQuit")
-                    .font(.title.weight(.semibold))
-                Text("Middle-click to quit Dock apps and close browser tabs.")
-                    .font(.callout)
+            VStack(alignment: .leading, spacing: 5) {
+                Text("UXTapFix")
+                    .font(.system(size: 28, weight: .bold))
+                    .tracking(-0.6)
+
+                Text("Sync three tap and middle click controls")
+                    .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Spacer(minLength: 0)
+            Spacer(minLength: 8)
+
+            SyncGlyph()
         }
-        .padding(16)
+        .padding(.horizontal, 22)
+        .padding(.vertical, 20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
+        .background(heroBackground)
+        .overlay(heroBorder)
+        .shadow(color: .black.opacity(0.05), radius: 8, y: 3)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text("UXTapFix. Sync three tap and middle click controls"))
+    }
+
+    private var heroBackground: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: SetupStyle.heroCornerRadius, style: .continuous)
+                .fill(SetupColors.card)
+
             RoundedRectangle(cornerRadius: SetupStyle.heroCornerRadius, style: .continuous)
                 .fill(
                     LinearGradient(
                         colors: [
-                            Color.accentColor.opacity(0.18),
+                            Color.accentColor.opacity(0.20),
                             Color.accentColor.opacity(0.04)
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     )
                 )
-        )
-        .overlay(
+
             RoundedRectangle(cornerRadius: SetupStyle.heroCornerRadius, style: .continuous)
-                .strokeBorder(Color.accentColor.opacity(0.20), lineWidth: 1)
-        )
+                .fill(
+                    RadialGradient(
+                        colors: [
+                            Color.accentColor.opacity(0.20),
+                            Color.accentColor.opacity(0)
+                        ],
+                        center: .topTrailing,
+                        startRadius: 0,
+                        endRadius: 190
+                    )
+                )
+        }
+    }
+
+    private var heroBorder: some View {
+        RoundedRectangle(cornerRadius: SetupStyle.heroCornerRadius, style: .continuous)
+            .strokeBorder(
+                LinearGradient(
+                    colors: [
+                        Color.accentColor.opacity(0.38),
+                        Color.accentColor.opacity(0.10)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ),
+                lineWidth: 1
+            )
+    }
+}
+
+/// Quiet, oversized "in sync" mark that balances the header.
+private struct SyncGlyph: View {
+    var body: some View {
+        ZStack {
+            Circle()
+                .strokeBorder(Color.accentColor.opacity(0.14), lineWidth: 1)
+                .frame(width: 58, height: 58)
+
+            Circle()
+                .strokeBorder(Color.accentColor.opacity(0.09), lineWidth: 1)
+                .frame(width: 40, height: 40)
+
+            Image(systemName: "arrow.triangle.2.circlepath")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(Color.accentColor.opacity(0.70))
+        }
+        .frame(width: 58, height: 58)
+        .accessibilityHidden(true)
     }
 }
 
@@ -133,13 +199,15 @@ struct FeaturePreviewCard: View {
     let kind: FeaturePreviewKind
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 6) {
                 Image(systemName: kind.symbol)
-                    .font(.callout)
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(Color.accentColor)
+                    .frame(width: 16)
                 Text(kind.title)
                     .font(.callout.weight(.semibold))
+                    .lineLimit(1)
                 Spacer(minLength: 0)
             }
 
@@ -147,12 +215,12 @@ struct FeaturePreviewCard: View {
                 .frame(height: SetupStyle.previewStageHeight)
                 .frame(maxWidth: .infinity)
                 .background(
-                    RoundedRectangle(cornerRadius: SetupStyle.previewCornerRadius, style: .continuous)
-                        .fill(Color(nsColor: .textBackgroundColor).opacity(0.6))
+                    RoundedRectangle(cornerRadius: SetupStyle.innerCornerRadius, style: .continuous)
+                        .fill(SetupColors.canvas)
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: SetupStyle.previewCornerRadius, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: SetupStyle.innerCornerRadius, style: .continuous)
+                        .strokeBorder(SetupColors.subtleBorder, lineWidth: 1)
                 )
 
             Text(kind.caption)
@@ -160,15 +228,15 @@ struct FeaturePreviewCard: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(
-            RoundedRectangle(cornerRadius: SetupStyle.previewCornerRadius, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
+            RoundedRectangle(cornerRadius: SetupStyle.cardCornerRadius, style: .continuous)
+                .fill(SetupColors.card)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: SetupStyle.previewCornerRadius, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+            RoundedRectangle(cornerRadius: SetupStyle.cardCornerRadius, style: .continuous)
+                .strokeBorder(SetupColors.border, lineWidth: 1)
         )
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text("\(kind.title). \(kind.caption)"))
@@ -219,7 +287,7 @@ private struct FeatureStillStage: View {
         VStack(spacing: 6) {
             ZStack(alignment: .topTrailing) {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor))
+                    .fill(SetupColors.canvas)
                     .frame(width: 32, height: 32)
                     .overlay(
                         Image(systemName: kind.symbol)
@@ -373,73 +441,124 @@ private struct DockQuitScene: View {
 
 // MARK: - Three-finger tap preview
 
-/// A three-finger trackpad tap (or click) is synced to a real middle click at the pointer.
+/// A simple mouse outline with a lit scroll wheel standing in for the middle button.
+private struct MiddleMouseGlyph: View {
+    let size: CGFloat
+    let active: Bool
+
+    var body: some View {
+        let bodyWidth = size * 0.58
+        let bodyHeight = size * 0.82
+
+        ZStack(alignment: .top) {
+            RoundedRectangle(cornerRadius: bodyWidth * 0.5, style: .continuous)
+                .fill(SetupColors.canvas)
+                .overlay(
+                    RoundedRectangle(cornerRadius: bodyWidth * 0.5, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.32), lineWidth: 1)
+                )
+                .frame(width: bodyWidth, height: bodyHeight)
+
+            Rectangle()
+                .fill(Color.primary.opacity(0.16))
+                .frame(width: bodyWidth, height: 1)
+                .offset(y: bodyHeight * 0.36)
+
+            Capsule()
+                .fill(active ? Color.accentColor : Color.primary.opacity(0.40))
+                .frame(width: max(size * 0.07, 2.5), height: bodyHeight * 0.22)
+                .offset(y: bodyHeight * 0.13)
+        }
+        .frame(width: bodyWidth, height: bodyHeight)
+    }
+}
+
+/// The three-finger tap and the middle mouse click shown as one synced action.
 private struct TrackpadTapScene: View {
     let size: CGSize
     let phase: FeatureAnimationClock.Phase
 
     var body: some View {
-        let trackpad = CGRect(
-            x: size.width * 0.05,
-            y: size.height * 0.06,
-            width: size.width * 0.90,
-            height: size.height * 0.58
-        )
-        let press = CGPoint(x: trackpad.midX, y: trackpad.midY + 6)
-        let resting = CGPoint(x: size.width * 0.86, y: size.height * 0.90)
         let travel = CGFloat(phase.cursor)
-        let cursor = CGPoint(
-            x: resting.x + (press.x - resting.x) * travel,
-            y: resting.y + (press.y - resting.y) * travel
-        )
         let ripple = CGFloat(phase.ripple)
         let result = CGFloat(phase.result)
-        // The three fingers depress while the pointer approaches the trackpad.
+        // The three fingers depress while the gesture fires.
         let fingerPress = CGFloat(min(max((travel - 0.5) / 0.45, 0), 1))
 
+        let item = min(size.width * 0.22, 36)
+        let gap: CGFloat = max(size.width * 0.15, 26)
+        let leftX = size.width / 2 - item / 2 - gap / 2
+        let rightX = size.width / 2 + item / 2 + gap / 2
+        let centerY = size.height * 0.36
+        let fired = result > 0.05
+
         ZStack {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            // Left: three-finger tap
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .fill(Color(nsColor: .textBackgroundColor))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
                         .strokeBorder(Color.primary.opacity(0.10), lineWidth: 1)
                 )
-                .frame(width: trackpad.width, height: trackpad.height)
-                .position(x: trackpad.midX, y: trackpad.midY)
+                .frame(width: item, height: item)
+                .position(x: leftX, y: centerY)
 
             ForEach(0..<3, id: \.self) { index in
                 Circle()
                     .fill(Color.primary.opacity(0.5))
-                    .frame(width: 13, height: 13)
+                    .frame(width: 7, height: 7)
                     .scaleEffect(1 - fingerPress * 0.4, anchor: .center)
                     .position(
-                        x: trackpad.midX - 16 + CGFloat(index) * 16,
-                        y: trackpad.midY - 30
+                        x: leftX - item * 0.22 + CGFloat(index) * 8,
+                        y: centerY - item * 0.18
                     )
             }
+
+            // Sync mark: the two inputs are the same click.
+            Text("=")
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                .foregroundStyle(Color.accentColor.opacity(fired ? 1 : 0.7))
+                .position(x: size.width / 2, y: centerY)
+
+            // Right: middle mouse button
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(Color(nsColor: .textBackgroundColor))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(
+                            fired ? Color.accentColor.opacity(0.35) : Color.primary.opacity(0.10),
+                            lineWidth: 1
+                        )
+                )
+                .frame(width: item, height: item)
+                .position(x: rightX, y: centerY)
+
+            MiddleMouseGlyph(size: item, active: fired)
+                .position(x: rightX, y: centerY)
 
             if ripple > 0.01 {
                 Circle()
                     .stroke(Color.accentColor.opacity(0.8 * (1 - ripple)), lineWidth: 1.5)
-                    .frame(width: 24 + ripple * 30, height: 24 + ripple * 30)
-                    .position(press)
+                    .frame(width: item + ripple * 26, height: item + ripple * 26)
+                    .position(x: leftX, y: centerY)
+
+                Circle()
+                    .stroke(Color.accentColor.opacity(0.8 * (1 - ripple)), lineWidth: 1.5)
+                    .frame(width: item + ripple * 26, height: item + ripple * 26)
+                    .position(x: rightX, y: centerY)
             }
 
-            if result > 0.05 {
-                poofBurst(center: press, radius: 10 + result * 22, result: phase.result)
-            }
+            Text("3-finger tap")
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(.secondary)
+                .fixedSize()
+                .position(x: leftX, y: size.height - 10)
 
-            if result > 0.05 {
-                Text("Middle click")
-                    .font(.caption2.weight(.semibold))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Capsule().fill(Color.primary.opacity(0.1)))
-                    .opacity(result)
-                    .position(x: press.x, y: max(press.y - 26, 12))
-            }
-
-            Pointer(position: cursor, pressed: ripple > 0.35 && ripple < 0.8)
+            Text("Middle click")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(fired ? Color.accentColor : Color.secondary)
+                .fixedSize()
+                .position(x: rightX, y: size.height - 10)
         }
         .frame(width: size.width, height: size.height)
     }
@@ -455,84 +574,57 @@ private struct EscalationScene: View {
     private let clickTimes: [TimeInterval] = [1.5, 3.3, 5.1]
     private let stepLabels = [
         "Quit normally",
-        "Stop background, then force quit",
-        "Force quit immediately"
+        "Stop helpers",
+        "Force quit now"
     ]
 
     var body: some View {
         let elapsed = date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: FeatureAnimationClock.loop)
         let firedCount = clickTimes.filter { elapsed >= $0 }.count
-        let highlight = firedCount > 0 ? min(firedCount - 1, 2) : nil
-        let since = highlight.map { elapsed - clickTimes[$0] } ?? 0
-        let ripple = CGFloat(FeatureAnimationClock.pulse(since, from: 0, to: 0.6))
-        let pressed = highlight != nil && since > 0.1 && since < 0.5
+        let active = firedCount > 0 ? min(firedCount - 1, 2) : nil
 
-        let tile = min(max(size.height * 0.30, 20), 32)
-        let target = CGPoint(x: size.width * 0.42, y: size.height * 0.50)
-        let resting = CGPoint(x: size.width * 0.86, y: size.height * 0.90)
-        let approach = CGFloat(FeatureAnimationClock.smoothstep(min(max(elapsed, 0.5), 1.5), from: 0.5, to: 1.5))
-        let cursor = CGPoint(
-            x: resting.x + (target.x - resting.x) * approach,
-            y: resting.y + (target.y - resting.y) * approach
-        )
+        VStack(spacing: 4) {
+            ForEach(0..<3, id: \.self) { index in
+                let fired = elapsed >= clickTimes[index]
+                let isActive = active == index
 
-        ZStack {
-            RoundedRectangle(cornerRadius: tile * 0.3, style: .continuous)
-                .fill(Color(nsColor: .textBackgroundColor))
-                .overlay(
-                    Image(systemName: "square.grid.2x2")
-                        .font(.system(size: tile * 0.5))
-                        .foregroundStyle(Color.primary.opacity(0.75))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: tile * 0.3)
-                        .strokeBorder(Color.primary.opacity(0.10), lineWidth: 1)
-                )
-                .frame(width: tile, height: tile)
-                .scaleEffect(highlight != nil && since > 0.05 && since < 0.5 ? 0.93 : 1)
-                .position(target)
+                HStack(spacing: 8) {
+                    Text("\(index + 1)×")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
+                        .frame(width: 16, alignment: .trailing)
 
-            if ripple > 0.01 {
-                Circle()
-                    .stroke(Color.accentColor.opacity(0.8 * (1 - ripple)), lineWidth: 1.5)
-                    .frame(width: tile + ripple * 30, height: tile + ripple * 30)
-                    .position(target)
-            }
+                    Text(stepLabels[index])
+                        .font(.system(size: 10, weight: isActive ? .semibold : .regular))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
 
-            if highlight != nil, since > 0.35 {
-                poofBurst(center: target, radius: 8 + CGFloat(since) * 14, result: min(since, 1))
-            }
+                    Spacer(minLength: 0)
 
-            Pointer(position: cursor, pressed: pressed)
-
-            VStack(spacing: 7) {
-                ForEach(0..<3, id: \.self) { index in
-                    let fired = elapsed >= clickTimes[index]
-                    HStack(spacing: 8) {
-                        Text("\(index + 1)×")
-                            .font(.caption2.weight(.bold))
-                            .frame(width: 18, alignment: .trailing)
-                        Text(stepLabels[index])
-                            .font(.caption2)
-                        Spacer(minLength: 0)
+                    if fired {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(Color.accentColor)
                     }
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 3.5)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(highlight == index ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.03))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .strokeBorder(Color.primary.opacity(highlight == index ? 0.30 : 0.06), lineWidth: 1)
-                    )
-                    .foregroundStyle(fired ? Color.primary : Color.secondary.opacity(0.7))
-                    .opacity(fired ? 1 : 0.45)
                 }
+                .padding(.horizontal, 8)
+                .frame(height: 20)
+                .background(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(
+                            isActive
+                                ? Color.accentColor.opacity(0.14)
+                                : Color.primary.opacity(fired ? 0.05 : 0.025)
+                        )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .strokeBorder(isActive ? Color.accentColor.opacity(0.35) : Color.clear, lineWidth: 1)
+                )
+                .opacity(fired ? 1 : 0.55)
             }
-            .frame(maxWidth: .infinity, alignment: .center)
-            .position(x: size.width / 2, y: size.height * 0.84)
         }
+        .padding(.horizontal, 8)
         .frame(width: size.width, height: size.height)
     }
 }

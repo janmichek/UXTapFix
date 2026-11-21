@@ -1,5 +1,5 @@
 #!/usr/bin/env swift
-// Generates the DockMiddleQuit app icon as an .iconset directory.
+// Generates the UXTapFix app icon as an .iconset directory.
 // Usage: swift tools/make-icon.swift <output.iconset>
 import AppKit
 import Foundation

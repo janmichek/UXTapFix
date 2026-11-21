@@ -1,16 +1,16 @@
 #!/bin/zsh
-# Print DockMiddleQuit service, permission, and log status.
+# Print UXTapFix service, permission, and log status.
 set -u
 
-APP="$HOME/Applications/DockMiddleQuit.app"
-BIN="$APP/Contents/MacOS/DockMiddleQuit"
-SUPPORT="$HOME/Library/Application Support/DockMiddleQuit"
-LOG="$HOME/Library/Logs/DockMiddleQuit.log"
-PLIST="$HOME/Library/LaunchAgents/com.user.dockmiddlequit.plist"
+APP="$HOME/Applications/UXTapFix.app"
+BIN="$APP/Contents/MacOS/UXTapFix"
+SUPPORT="$HOME/Library/Application Support/UXTapFix"
+LOG="$HOME/Library/Logs/UXTapFix.log"
+PLIST="$HOME/Library/LaunchAgents/com.user.uxtapfix.plist"
 DOMAIN="gui/$(id -u)"
-LABEL="com.user.dockmiddlequit"
+LABEL="com.user.uxtapfix"
 
-echo "=== DockMiddleQuit status ==="
+echo "=== UXTapFix status ==="
 if [[ -d "$APP" ]]; then
     echo "App:         $APP"
     echo "Version:     $(defaults read "$APP/Contents/Info" CFBundleShortVersionString 2>/dev/null || echo unknown)"
@@ -46,7 +46,7 @@ tail -n 30 "$LOG" 2>&1
 
 echo ""
 echo "Trackpad settings:"
-defaults read com.user.dockmiddlequit 2>/dev/null | grep -E 'middleClick' || echo "  defaults (3 fingers, tap-to-click on)"
+defaults read com.user.uxtapfix 2>/dev/null | grep -E 'middleClick' || echo "  defaults (3 fingers, tap-to-click on)"
 echo ""
 echo "MiddleClick app:"
 if pgrep -x MiddleClick >/dev/null 2>&1; then

@@ -1,5 +1,5 @@
 #!/bin/zsh
-# DockMiddleQuit installer
+# UXTapFix installer
 #
 #   ./install.sh              Build and open the guided Setup app.
 #   ./install.sh --headless   Install the daemon + login item without any UI.
@@ -11,15 +11,15 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 DIST="$ROOT/dist"
-SETUP_APP="$DIST/DockMiddleQuit Setup.app"
-DAEMON_APP="$DIST/DockMiddleQuit.app"
-APP="$HOME/Applications/DockMiddleQuit.app"
-SETUP_DEST="$HOME/Applications/DockMiddleQuit Setup.app"
-SUPPORT="$HOME/Library/Application Support/DockMiddleQuit"
-PLIST="$HOME/Library/LaunchAgents/com.user.dockmiddlequit.plist"
-LOG="$HOME/Library/Logs/DockMiddleQuit.log"
-LEGACY_APP="/Applications/DockMiddleQuit.app"
-LABEL="com.user.dockmiddlequit"
+SETUP_APP="$DIST/UXTapFix Setup.app"
+DAEMON_APP="$DIST/UXTapFix.app"
+APP="$HOME/Applications/UXTapFix.app"
+SETUP_DEST="$HOME/Applications/UXTapFix Setup.app"
+SUPPORT="$HOME/Library/Application Support/UXTapFix"
+PLIST="$HOME/Library/LaunchAgents/com.user.uxtapfix.plist"
+LOG="$HOME/Library/Logs/UXTapFix.log"
+LEGACY_APP="/Applications/UXTapFix.app"
+LABEL="com.user.uxtapfix"
 DOMAIN="gui/$(id -u)"
 
 mode="guided"
@@ -66,24 +66,24 @@ fi
 if [[ "$mode" == "guided" ]]; then
     open "$SETUP_APP"
     echo ""
-    echo "DockMiddleQuit Setup is opening. Follow the short steps:"
+    echo "UXTapFix Setup is opening. Follow the short steps:"
     echo "  Welcome -> Permissions -> Launch at Login"
     exit 0
 fi
 
 # MARK: Headless install
 
-echo "Installing DockMiddleQuit for $(whoami)…"
+echo "Installing UXTapFix for $(whoami)…"
 
 # Stop any old copy before replacing the bundle.
 launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
-pkill -x DockMiddleQuit 2>/dev/null || true
+pkill -x UXTapFix 2>/dev/null || true
 sleep 0.3
 
 if [[ -d "$LEGACY_APP" ]]; then
     echo "Moving the old /Applications copy to the Trash…"
     mkdir -p "$HOME/.Trash"
-    mv "$LEGACY_APP" "$HOME/.Trash/DockMiddleQuit-old-$(date +%Y%m%d-%H%M%S).app" 2>/dev/null || {
+    mv "$LEGACY_APP" "$HOME/.Trash/UXTapFix-old-$(date +%Y%m%d-%H%M%S).app" 2>/dev/null || {
         echo "Could not move $LEGACY_APP to the Trash." >&2
         echo "Remove it manually, then run this installer again." >&2
         exit 1
@@ -96,8 +96,8 @@ ditto "$DAEMON_APP" "$APP"
 xattr -dr com.apple.quarantine "$APP" 2>/dev/null || true
 
 # Keep the source and helper scripts with the installation, like the Setup app.
-if [[ -f "$ROOT/src/DockMiddleQuit.swift" ]]; then
-    cp "$ROOT/src/DockMiddleQuit.swift" "$SUPPORT/"
+if [[ -f "$ROOT/src/UXTapFix.swift" ]]; then
+    cp "$ROOT/src/UXTapFix.swift" "$SUPPORT/"
 fi
 if [[ -d "$ROOT/src/MultitouchSupport" ]]; then
     rm -rf "$SUPPORT/MultitouchSupport"
@@ -116,7 +116,7 @@ fi
 # MARK: Login item
 
 cp "$ROOT/launchagent/$LABEL.plist" "$PLIST"
-/usr/libexec/PlistBuddy -c "Set :ProgramArguments:0 \"$APP/Contents/MacOS/DockMiddleQuit\"" "$PLIST"
+/usr/libexec/PlistBuddy -c "Set :ProgramArguments:0 \"$APP/Contents/MacOS/UXTapFix\"" "$PLIST"
 /usr/libexec/PlistBuddy -c "Set :StandardOutPath \"$LOG\"" "$PLIST"
 /usr/libexec/PlistBuddy -c "Set :StandardErrorPath \"$LOG\"" "$PLIST"
 plutil -lint "$PLIST" >/dev/null

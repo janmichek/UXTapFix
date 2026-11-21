@@ -6,18 +6,18 @@ set -euo pipefail
 cd "$(dirname "$0")"
 SETUP_APP=""
 
-if [[ -d "DockMiddleQuit Setup.app" ]]; then
-    SETUP_APP="DockMiddleQuit Setup.app"
-elif [[ -d "dist/DockMiddleQuit Setup.app" ]]; then
-    SETUP_APP="dist/DockMiddleQuit Setup.app"
+if [[ -d "UXTapFix Setup.app" ]]; then
+    SETUP_APP="UXTapFix Setup.app"
+elif [[ -d "dist/UXTapFix Setup.app" ]]; then
+    SETUP_APP="dist/UXTapFix Setup.app"
 elif [[ -x "./build.sh" ]]; then
-    echo "Building DockMiddleQuit…"
+    echo "Building UXTapFix…"
     ./build.sh
-    SETUP_APP="dist/DockMiddleQuit Setup.app"
+    SETUP_APP="dist/UXTapFix Setup.app"
 fi
 
 if [[ -z "$SETUP_APP" ]]; then
-    echo "Could not find DockMiddleQuit Setup.app." >&2
+    echo "Could not find UXTapFix Setup.app." >&2
     echo "Put this command next to the Setup app, or run ./build.sh first." >&2
     echo ""
     read -r "?Press Return to close…"

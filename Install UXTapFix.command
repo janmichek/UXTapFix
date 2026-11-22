@@ -1,6 +1,8 @@
 #!/bin/zsh
 # Double-click launcher for the guided setup assistant.
-# Also clears the download quarantine flag from ad-hoc signed builds.
+# Copies the ad-hoc-signed Setup app to a writable temporary folder, clears
+# the download quarantine flag there, and opens it. DMGs are read-only, so
+# clearing quarantine in place cannot work.
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -24,5 +26,21 @@ if [[ -z "$SETUP_APP" ]]; then
     exit 1
 fi
 
-xattr -dr com.apple.quarantine "$SETUP_APP" 2>/dev/null || true
-open "$SETUP_APP"
+if pgrep -x UXTapFixSetup >/dev/null 2>&1; then
+    echo "UXTapFix Setup is already running. Close it, then run this command again." >&2
+    echo ""
+    read -r "?Press Return to close…"
+    exit 1
+fi
+
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/uxtapfix-setup.XXXXXX")"
+DEST="$WORK/UXTapFix Setup.app"
+
+echo "Preparing UXTapFix Setup…"
+ditto "$SETUP_APP" "$DEST"
+xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
+open "$DEST"
+
+echo ""
+echo "Setup is opening from $DEST."
+echo "The temporary copy can be removed after Setup closes."

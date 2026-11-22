@@ -3,15 +3,35 @@ import Combine
 import Darwin
 import Foundation
 
+/// Tracks work that must not be interrupted by closing the Setup window.
+@MainActor
+final class SetupActivity {
+    static let shared = SetupActivity()
+
+    private var workCount = 0
+    var isBusy: Bool { workCount > 0 }
+
+    func begin() { workCount += 1 }
+    func end() { workCount = max(0, workCount - 1) }
+}
+
 // MARK: - Status file written by the daemon
 
 struct DaemonStatus {
     let accessibility: Bool
     let inputMonitoring: Bool
     let updatedAt: Date
+    let pid: pid_t?
 
     var isFresh: Bool {
         Date().timeIntervalSince(updatedAt) < 8
+    }
+
+    var isAlive: Bool {
+        guard let pid, pid > 0 else { return false }
+        errno = 0
+        if kill(pid, 0) == 0 { return true }
+        return errno == EPERM
     }
 
     static func read(from url: URL) -> DaemonStatus? {
@@ -29,7 +49,8 @@ struct DaemonStatus {
         return DaemonStatus(
             accessibility: (object["accessibility"] as? Bool) ?? false,
             inputMonitoring: (object["inputMonitoring"] as? Bool) ?? false,
-            updatedAt: Date(timeIntervalSince1970: updatedAt)
+            updatedAt: Date(timeIntervalSince1970: updatedAt),
+            pid: (object["pid"] as? NSNumber)?.int32Value
         )
     }
 }
@@ -38,7 +59,7 @@ struct DaemonStatus {
 
 @MainActor
 final class SetupModel: ObservableObject {
-    enum Step {
+    enum Step: CaseIterable, Equatable {
         case welcome
         case permissions
         case finish
@@ -66,56 +87,22 @@ final class SetupModel: ObservableObject {
 
     enum PermissionKind {
         case accessibility
-        case inputMonitoring
 
         var settingsURL: String {
-            switch self {
-            case .accessibility:
-                return "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
-            case .inputMonitoring:
-                return "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
-            }
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
         }
 
-        var requestArgument: String {
-            switch self {
-            case .accessibility: return "--request-accessibility"
-            case .inputMonitoring: return "--request-input-monitoring"
-            }
-        }
+        var requestArgument: String { "--request-accessibility" }
 
-        var displayName: String {
-            switch self {
-            case .accessibility: return "Accessibility"
-            case .inputMonitoring: return "Input Monitoring"
-            }
-        }
+        var displayName: String { "Accessibility" }
 
-        // Service names accepted by `tccutil reset`.
-        var tccService: String {
-            switch self {
-            case .accessibility: return "Accessibility"
-            case .inputMonitoring: return "ListenEvent"
-            }
-        }
+        /// Service name accepted by `tccutil reset`. Accessibility only.
+        /// ListenEvent is never reset: an ad-hoc build cannot add itself back.
+        var tccService: String { "Accessibility" }
 
-        var icon: String {
-            switch self {
-            case .accessibility: return "accessibility"
-            case .inputMonitoring: return "keyboard"
-            }
-        }
+        var icon: String { "accessibility" }
 
-        var summary: String {
-            switch self {
-            case .accessibility: return "Identify the Dock icon under the pointer."
-            case .inputMonitoring: return "Catch clicks before the Dock menu appears and rewrite three-finger clicks."
-            }
-        }
-
-        var isRequired: Bool {
-            self == .accessibility
-        }
+        var summary: String { "Identify the Dock icon under the pointer." }
     }
 
     struct InstallerError: LocalizedError {
@@ -131,7 +118,9 @@ final class SetupModel: ObservableObject {
     @Published var installPhase: InstallPhase = .idle
     @Published var errorMessage: String?
     @Published var infoMessage: String?
-    @Published var requestedPermission: PermissionKind?
+    /// True only while System Settings is being opened. It does not stay on
+    /// until macOS reports a grant, so a stale switch can be cleared again.
+    @Published var permissionRequestBusy = false
     @Published var restartingService = false
     @Published var hadLegacyInstall = false
     @Published var legacyLoginItemPresent = false
@@ -143,6 +132,7 @@ final class SetupModel: ObservableObject {
     private var previousAccessibility = false
     private var previousInputMonitoring = false
     private var isCheckingLegacyLoginItem = false
+    private var legacyRetirement: Task<Void, Never>?
 
     let label = "com.user.uxtapfix"
 
@@ -158,6 +148,7 @@ final class SetupModel: ObservableObject {
     private var previousInstallURLs: [URL] {
         [
             URL(fileURLWithPath: "/Applications/\(previousAppName).app", isDirectory: true),
+            URL(fileURLWithPath: "/Applications/\(previousAppName) Setup.app", isDirectory: true),
             homeURL.appendingPathComponent("Applications/\(previousAppName).app", isDirectory: true),
             homeURL.appendingPathComponent("Applications/\(previousAppName) Setup.app", isDirectory: true),
             homeURL.appendingPathComponent("Library/LaunchAgents/\(previousBundleIdentifier).plist")
@@ -209,14 +200,8 @@ final class SetupModel: ObservableObject {
 
     // MARK: Derived state
 
-    var serviceRunning: Bool { status?.isFresh == true }
+    var serviceRunning: Bool { status?.isFresh == true && status?.isAlive == true }
     var accessibilityGranted: Bool { status?.accessibility == true }
-    var inputMonitoringGranted: Bool {
-        // Accessibility grants listen access too. macOS can still leave the
-        // separate preflight false in a daemon that launched before the grant,
-        // so do not make Setup wait on (or link to) the Input Monitoring pane.
-        status?.inputMonitoring == true || accessibilityGranted
-    }
 
     // MARK: Lifecycle
 
@@ -229,11 +214,30 @@ final class SetupModel: ObservableObject {
         hadLegacyInstall = legacyInstalled
         refreshLegacyLoginItemStatus()
         refresh()
+        if installed && legacyInstalled {
+            Task { await retireLegacySystemCopy() }
+        }
         guard installed else {
             step = .welcome
             return
         }
         step = .permissions
+    }
+
+    /// Moves a leftover `/Applications/UXTapFix.app` to the Trash without
+    /// reinstalling the per-user copy. Safe to call more than once.
+    func retireLegacySystemCopy() async {
+        SetupActivity.shared.begin()
+        defer { SetupActivity.shared.end() }
+        if let existing = legacyRetirement {
+            await existing.value
+        }
+        guard legacyInstalled else { return }
+        let task = Task { @MainActor in
+            await self.performLegacyRetirement()
+        }
+        legacyRetirement = task
+        await task.value
     }
 
     func refresh() {
@@ -249,11 +253,15 @@ final class SetupModel: ObservableObject {
             status = nil
         }
 
-        if requestedPermission == .accessibility && accessibilityGranted {
-            requestedPermission = nil
-        }
-        if requestedPermission == .inputMonitoring && inputMonitoringGranted {
-            requestedPermission = nil
+    }
+
+    func showInfo(_ message: String, clearAfter seconds: TimeInterval = 4) {
+        infoMessage = message
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            if infoMessage == message {
+                infoMessage = nil
+            }
         }
     }
 
@@ -267,20 +275,18 @@ final class SetupModel: ObservableObject {
         guard hasPermissionBaseline else { return }
         let gainedAccessibility = !previousAccessibility && newStatus.accessibility
         let gainedInputMonitoring = !previousInputMonitoring && newStatus.inputMonitoring
-        guard (gainedAccessibility || gainedInputMonitoring), newStatus.isFresh, launchAtLogin, !restartingService else {
+        guard (gainedAccessibility || gainedInputMonitoring), newStatus.isFresh, newStatus.isAlive, launchAtLogin, !restartingService else {
             return
         }
 
         restartingService = true
-        infoMessage = "Permission granted. Restarting UXTapFix so it takes effect…"
+        showInfo("Permission granted. Restarting UXTapFix so it takes effect…", clearAfter: 2)
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 700_000_000)
-            restartService(quiet: true)
+            let restarted = restartService(quiet: true)
             restartingService = false
-            infoMessage = "Permission applied. You're good to go."
-            try? await Task.sleep(nanoseconds: 2_500_000_000)
-            if infoMessage == "Permission applied. You're good to go." {
-                infoMessage = nil
+            if restarted {
+                showInfo("Permission applied. You're good to go.")
             }
         }
     }
@@ -314,25 +320,37 @@ final class SetupModel: ObservableObject {
     func install() async {
         guard !busy else { return }
         busy = true
+        SetupActivity.shared.begin()
+        defer {
+            busy = false
+            SetupActivity.shared.end()
+        }
         errorMessage = nil
         infoMessage = nil
-        installPhase = .stopping
+        installPhase = .copying
 
         do {
-            _ = stopService()
+            try rejectDowngrade()
             removePreviousInstall()
-            stopRunningDaemons()
             try migrateLegacyInstall()
 
-            installPhase = .copying
+            // Build and verify the replacement while the old service keeps
+            // running. Only the short stop/replace/start window is destructive.
             try await Task.sleep(nanoseconds: 180_000_000)
-            try copyPayloadApp()
+            let staged = try stagePayloadApp()
+            defer { try? fileManager.removeItem(at: staged) }
             copySupportFiles()
 
             installPhase = .registering
             try await Task.sleep(nanoseconds: 180_000_000)
             try writeLaunchAgent()
             copySetupAppIfNeeded()
+
+            installPhase = .stopping
+            try await Task.sleep(nanoseconds: 180_000_000)
+            _ = stopService()
+            stopRunningDaemons()
+            try installStagedApp(staged)
 
             installPhase = .starting
             try await Task.sleep(nanoseconds: 180_000_000)
@@ -344,15 +362,48 @@ final class SetupModel: ObservableObject {
             await unregisterLegacyLoginItemIfNeeded()
             try await Task.sleep(nanoseconds: 650_000_000)
             refresh()
-            await waitForFreshStatus(timeout: 5.0)
-            infoMessage = "UXTapFix is installed. Grant the permissions below."
+            let healthy = await waitForFreshStatus(timeout: 5.0)
+            if healthy {
+                showInfo("UXTapFix is installed. Grant the permissions below.")
+            } else {
+                showInfo("UXTapFix is installed, but the background service hasn't reported yet. Check the log.", clearAfter: 8)
+            }
             step = .permissions
         } catch {
             installPhase = .idle
             errorMessage = error.localizedDescription
+            // Best effort: if the old app is still intact and launchd stopped
+            // it, bring it back rather than leaving the user with no service.
+            if fileManager.isExecutableFile(atPath: daemonBinaryURL.path) {
+                try? startService()
+            }
         }
+    }
 
-        busy = false
+    private func rejectDowngrade() throws {
+        guard let payloadURL = payloadAppURL,
+              let payloadVersion = bundleVersion(at: payloadURL) else { return }
+        for url in [appURL, legacyAppURL] {
+            guard fileManager.fileExists(atPath: url.path),
+                  let installedVersion = bundleVersion(at: url),
+                  Self.isVersion(installedVersion, newerThan: payloadVersion) else { continue }
+            throw InstallerError(message: "A newer copy of UXTapFix (\(installedVersion)) is already installed at \(url.path). This installer is version \(payloadVersion). Use the newer installer, or remove that copy first.")
+        }
+    }
+
+    private func bundleVersion(at url: URL) -> String? {
+        Bundle(url: url)?.infoDictionary?["CFBundleShortVersionString"] as? String
+    }
+
+    nonisolated private static func isVersion(_ lhs: String, newerThan rhs: String) -> Bool {
+        let left = lhs.split(separator: ".").map { Int($0) ?? 0 }
+        let right = rhs.split(separator: ".").map { Int($0) ?? 0 }
+        for index in 0..<max(left.count, right.count) {
+            let a = index < left.count ? left[index] : 0
+            let b = index < right.count ? right[index] : 0
+            if a != b { return a > b }
+        }
+        return false
     }
 
     private func stopRunningDaemons() {
@@ -384,16 +435,72 @@ final class SetupModel: ObservableObject {
         let previousSupportURL = homeURL
             .appendingPathComponent("Library/Application Support/\(previousAppName)", isDirectory: true)
         try? fileManager.removeItem(at: previousSupportURL)
+        try? fileManager.removeItem(at: URL(fileURLWithPath: "/tmp/dock-middle-quit.log"))
     }
 
     private func migrateLegacyInstall() throws {
         hadLegacyInstall = legacyInstalled
         guard hadLegacyInstall else { return }
+        stopProcesses(at: legacyAppURL)
         do {
             try fileManager.trashItem(at: legacyAppURL, resultingItemURL: nil)
         } catch {
             throw InstallerError(message: "An older copy of UXTapFix is in /Applications and couldn't be moved to the Trash. Remove it manually, then try again.\n\n\(error.localizedDescription)")
         }
+    }
+
+    private func performLegacyRetirement() async {
+        guard legacyInstalled else { return }
+        let repointAgent = launchAgentPointsAtLegacy()
+            && fileManager.isExecutableFile(atPath: daemonBinaryURL.path)
+        // KeepAlive would relaunch the copy we are about to trash.
+        if repointAgent {
+            _ = stopService()
+        }
+        do {
+            try migrateLegacyInstall()
+        } catch {
+            errorMessage = error.localizedDescription
+            return
+        }
+        if repointAgent {
+            do {
+                try writeLaunchAgent()
+                try startService()
+                launchAtLogin = true
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+        await unregisterLegacyLoginItemIfNeeded()
+        hadLegacyInstall = legacyInstalled
+        refreshLegacyLoginItemStatus()
+        refresh()
+    }
+
+    private func stopProcesses(at bundleURL: URL) {
+        let legacyPath = bundleURL.standardizedFileURL.path
+        let running = NSRunningApplication.runningApplications(withBundleIdentifier: label)
+        var stopped = false
+        for app in running {
+            let path = app.bundleURL?.standardizedFileURL.path ?? ""
+            if path == legacyPath || path.hasPrefix(legacyPath + "/") {
+                _ = app.terminate()
+                stopped = true
+            }
+        }
+        if stopped {
+            usleep(350_000)
+        }
+    }
+
+    private func launchAgentPointsAtLegacy() -> Bool {
+        guard let data = try? Data(contentsOf: launchAgentURL),
+              let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
+              let args = plist["ProgramArguments"] as? [String],
+              let program = args.first else { return false }
+        let legacyPath = legacyAppURL.standardizedFileURL.path
+        return program == legacyPath || program.hasPrefix(legacyPath + "/")
     }
 
     private func refreshLegacyLoginItemStatus() {
@@ -435,21 +542,52 @@ final class SetupModel: ObservableObject {
         refreshLegacyLoginItemStatus()
     }
 
-    private func copyPayloadApp() throws {
+    /// Copies and verifies the payload next to the installed app. The old app
+    /// keeps running until `installStagedApp` performs the short swap.
+    private func stagePayloadApp() throws -> URL {
         guard let payload = payloadAppURL else {
             throw InstallerError(message: "The installer is missing its UXTapFix.app payload. Rebuild the Setup app with ./build.sh and try again.")
         }
         let applications = appURL.deletingLastPathComponent()
         try fileManager.createDirectory(at: applications, withIntermediateDirectories: true)
-
-        if fileManager.fileExists(atPath: appURL.path) {
-            try fileManager.removeItem(at: appURL)
+        if let leftovers = try? fileManager.contentsOfDirectory(at: applications, includingPropertiesForKeys: nil) {
+            for leftover in leftovers where leftover.lastPathComponent.hasPrefix(".UXTapFix.app.staging-") {
+                try? fileManager.removeItem(at: leftover)
+            }
         }
-        try fileManager.copyItem(at: payload, to: appURL)
-        removeQuarantine(from: appURL)
+        let staged = applications.appendingPathComponent(".UXTapFix.app.staging-\(UUID().uuidString)", isDirectory: true)
 
+        do {
+            if fileManager.fileExists(atPath: staged.path) {
+                try fileManager.removeItem(at: staged)
+            }
+            try fileManager.copyItem(at: payload, to: staged)
+            removeQuarantine(from: staged)
+
+            let executable = staged.appendingPathComponent("Contents/MacOS/UXTapFix")
+            guard fileManager.isExecutableFile(atPath: executable.path) else {
+                throw InstallerError(message: "The copied app is missing its executable. Try rebuilding with ./build.sh.")
+            }
+            let verification = run("/usr/bin/codesign", ["--verify", "--deep", "--strict", staged.path])
+            guard verification.status == 0 else {
+                throw InstallerError(message: "The copied app failed code-signature verification.\n\n\(verification.output)")
+            }
+            return staged
+        } catch {
+            try? fileManager.removeItem(at: staged)
+            throw error
+        }
+    }
+
+    private func installStagedApp(_ staged: URL) throws {
+        if fileManager.fileExists(atPath: appURL.path) {
+            _ = try fileManager.replaceItemAt(appURL, withItemAt: staged, backupItemName: nil, options: [])
+        } else {
+            try fileManager.moveItem(at: staged, to: appURL)
+        }
+        removeQuarantine(from: appURL)
         guard fileManager.isExecutableFile(atPath: daemonBinaryURL.path) else {
-            throw InstallerError(message: "The copied app is missing its executable. Try rebuilding with ./build.sh.")
+            throw InstallerError(message: "The installed app is missing its executable. Try again with a fresh build.")
         }
     }
 
@@ -488,7 +626,8 @@ final class SetupModel: ObservableObject {
                 let destination = supportURL.appendingPathComponent(file.lastPathComponent)
                 try? fileManager.removeItem(at: destination)
                 try? fileManager.copyItem(at: file, to: destination)
-                try? fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: destination.path)
+                let permissions: Int = file.pathExtension == "sh" ? 0o755 : 0o644
+                try? fileManager.setAttributes([.posixPermissions: permissions], ofItemAtPath: destination.path)
             }
         }
     }
@@ -497,6 +636,12 @@ final class SetupModel: ObservableObject {
         let runningPath = Bundle.main.bundleURL.standardizedFileURL
         let destination = setupAppURL.standardizedFileURL
         guard runningPath.path != destination.path else { return }
+        if let installed = bundleVersion(at: destination),
+           let running = bundleVersion(at: runningPath),
+           Self.isVersion(installed, newerThan: running) {
+            // Running an older DMG must not overwrite a newer installed Setup.
+            return
+        }
 
         try? fileManager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
         if fileManager.fileExists(atPath: destination.path) {
@@ -549,22 +694,29 @@ final class SetupModel: ObservableObject {
         run("/bin/launchctl", ["bootout", domainLabel])
     }
 
-    func restartService(quiet: Bool = false) {
-        guard installed, launchAtLogin else { return }
-        restartingService = true
-        let result = run("/bin/launchctl", ["kickstart", "-k", domainLabel])
-        if result.status != 0 {
-            errorMessage = "Could not restart the background service.\n\n\(result.output)"
-        } else if !quiet {
-            infoMessage = "Background service restarted."
-        }
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 900_000_000)
-            restartingService = false
-            refresh()
-            if infoMessage == "Background service restarted." {
-                infoMessage = nil
+    @discardableResult
+    func restartService(quiet: Bool = false) -> Bool {
+        guard installed else { return false }
+        do {
+            if !fileManager.fileExists(atPath: launchAgentURL.path) {
+                try writeLaunchAgent()
             }
+            restartingService = true
+            try startService()
+            launchAtLogin = true
+            if !quiet {
+                showInfo("Background service restarted.")
+            }
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 900_000_000)
+                restartingService = false
+                refresh()
+            }
+            return true
+        } catch {
+            restartingService = false
+            errorMessage = error.localizedDescription
+            return false
         }
     }
 
@@ -580,7 +732,7 @@ final class SetupModel: ObservableObject {
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 700_000_000)
             refresh()
-            infoMessage = "MiddleClick quit. UXTapFix now handles the three-finger gesture."
+            showInfo("MiddleClick quit. UXTapFix now handles the three-finger gesture.")
         }
     }
 
@@ -592,7 +744,7 @@ final class SetupModel: ObservableObject {
                 try startService()
                 launchAtLogin = true
                 refresh()
-                infoMessage = "UXTapFix will start automatically when you log in."
+                showInfo("UXTapFix will start automatically when you log in.")
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -600,38 +752,25 @@ final class SetupModel: ObservableObject {
             _ = stopService()
             try? fileManager.removeItem(at: launchAgentURL)
             launchAtLogin = false
-            infoMessage = "UXTapFix won't start at login. You can turn it back on anytime."
+            showInfo("UXTapFix won't start at login. You can turn it back on anytime.")
         }
     }
 
-    private func waitForFreshStatus(timeout: TimeInterval) async {
+    @discardableResult
+    private func waitForFreshStatus(timeout: TimeInterval) async -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            if status?.isFresh == true { return }
+            if status?.isFresh == true && status?.isAlive == true { return true }
             try? await Task.sleep(nanoseconds: 200_000_000)
             refresh()
         }
+        return status?.isFresh == true && status?.isAlive == true
     }
 
     // MARK: Permissions
 
     func requestPermission(_ kind: PermissionKind) {
-        guard installed else { return }
-
-        guard kind == .accessibility else {
-            // Accessibility already grants this app everything Input
-            // Monitoring does. Sending the user to that pane is a dead end:
-            // macOS does not reliably list ad-hoc builds there, and the "+"
-            // picker is the only way in. Refresh the daemon instead so the
-            // event tap can start as soon as Accessibility is in place.
-            if accessibilityGranted {
-                restartService(quiet: true)
-                infoMessage = "Input Monitoring is included with Accessibility. Restarted UXTapFix."
-            } else {
-                infoMessage = "Input Monitoring is included with Accessibility. Grant Accessibility first."
-            }
-            return
-        }
+        guard installed, !permissionRequestBusy else { return }
 
         // Old installs (or ad-hoc rebuilds) can leave a stale TCC entry behind:
         // System Settings shows UXTapFix switched on, but the current app is
@@ -639,24 +778,22 @@ final class SetupModel: ObservableObject {
         // adds the current app and shows a real grant prompt. Never reset
         // ListenEvent: that removes UXTapFix from the Input Monitoring pane,
         // and an ad-hoc build cannot reliably add itself back.
-        if status?.isFresh == true {
-            _ = clearPermissionRecord(kind)
+        //
+        // The button is locked only while Settings is opening. It becomes
+        // clickable again even if the grant has not landed, so this reset can
+        // be repeated when the switch looks on but status stays off.
+        if status?.isFresh == true && status?.isAlive == true {
+            _ = run("/usr/bin/tccutil", ["reset", kind.tccService, label])
         }
-        requestedPermission = kind
+        permissionRequestBusy = true
         infoMessage = nil
         openDaemon(arguments: [kind.requestArgument])
+        let settingsURL = kind.settingsURL
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 1_100_000_000)
-            openSettings(kind.settingsURL)
+            openSettings(settingsURL)
+            permissionRequestBusy = false
         }
-    }
-
-    @discardableResult
-    private func clearPermissionRecord(_ kind: PermissionKind) -> ProcessResult {
-        guard kind == .accessibility else {
-            return ProcessResult(status: 0, output: "")
-        }
-        return run("/usr/bin/tccutil", ["reset", kind.tccService, label])
     }
 
     func openLoginItemsSettings() {
@@ -669,14 +806,15 @@ final class SetupModel: ObservableObject {
         configuration.arguments = arguments
         configuration.createsNewApplicationInstance = true
         configuration.activates = false
-        let binaryURL = daemonBinaryURL
+        let appPath = appURL.path
         NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { _, error in
             if error != nil {
-                // Fallback for environments where LaunchServices refuses a second
-                // instance. The daemon still receives the same TCC identity.
+                // Fallback for environments where the first launch request is
+                // refused. Use LaunchServices (`open -n`) rather than executing
+                // the binary directly, so TCC still sees the app bundle identity.
                 let process = Process()
-                process.executableURL = binaryURL
-                process.arguments = arguments
+                process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+                process.arguments = ["-n", appPath, "--args"] + arguments
                 try? process.run()
             }
         }
@@ -711,8 +849,17 @@ final class SetupModel: ObservableObject {
         } catch {
             return ProcessResult(status: -1, output: error.localizedDescription)
         }
+        // Never let a stuck launchctl/sfltool/xattr hang Setup forever.
+        let timeout = DispatchWorkItem {
+            if process.isRunning { process.terminate() }
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 2) {
+                if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+            }
+        }
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 10, execute: timeout)
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
+        timeout.cancel()
         let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return ProcessResult(status: process.terminationStatus, output: output)
     }

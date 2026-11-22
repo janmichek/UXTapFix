@@ -31,6 +31,9 @@ UXTapFix
 
 Middle-click (or three-finger tap) a Dock icon to quit that app.
 
+This release is ad-hoc signed, not notarized. `make-dmg.sh` prints the DMG
+SHA-256; verify it against the downloaded file before opening.
+
 INSTALL
 -------
 1. Open "UXTapFix Setup.app".
@@ -38,19 +41,19 @@ INSTALL
    That warning appears because this build is ad-hoc signed, not notarized.
 
 2. Follow the three steps:
-   Welcome -> Permissions & Login -> Try.
+   Welcome -> Permissions & Login -> Finish.
 
    No admin password is needed. The app is installed in your user folder:
    ~/Applications/UXTapFix.app
 
 If double-clicking the Setup app is blocked, double-click
-"Install UXTapFix.command" instead. It clears the download quarantine
-flag and opens the same assistant.
+"Install UXTapFix.command" instead. It copies the Setup app to a writable
+temporary folder, clears the download quarantine flag there, and opens it.
 
 PERMISSIONS
 -----------
-macOS requires you to approve Accessibility manually. Input Monitoring is
-included automatically with Accessibility, so no separate switch is needed.
+macOS requires you to approve Accessibility manually. This build uses an
+active event tap, so Input Monitoring is not needed as a separate switch.
 The Permissions & Login step also has the switch that starts UXTapFix when
 you log in. Leave it on so the utility keeps running in the background.
 
@@ -76,8 +79,9 @@ If macOS opens Look Up on a three-finger tap, set System Settings -> Trackpad
 -> Point & Click -> Look up & data detectors to "Force Click with one finger".
 
 The gesture uses Apple's private MultitouchSupport framework. It is not App
-Store compatible and may stop working after a macOS update. The Dock shortcut
-still works with a real middle-click mouse.
+Store compatible and may stop working after a macOS update. If the framework
+is missing, UXTapFix still launches and the Dock shortcut still works with a
+real middle-click mouse; only the trackpad gesture is disabled.
 
 UNINSTALL
 ---------

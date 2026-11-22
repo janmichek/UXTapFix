@@ -1,4 +1,4 @@
-// UXTapFix v2.3
+// UXTapFix v2.4
 // Middle-click (button 2) a Dock icon to quit that app.
 // Also turns a three-finger trackpad tap/click into a middle click, so the
 // same gesture closes a browser tab outside the Dock.
@@ -14,7 +14,7 @@ import MultitouchSupport
 import ServiceManagement
 setlinebuf(stdout)
 
-let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "2.3"
+let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "2.4"
 let supportDirectory = FileManager.default.homeDirectoryForCurrentUser
     .appendingPathComponent("Library/Application Support/UXTapFix", isDirectory: true)
 let statusFileURL = supportDirectory.appendingPathComponent("status.json")

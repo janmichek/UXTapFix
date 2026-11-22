@@ -27,9 +27,16 @@ OUT="$(mktemp -d "${TMPDIR:-/tmp}/uxtapfix-smoke.XXXXXX")"
 trap 'rm -rf "$OUT"' EXIT
 ./build.sh "$OUT" >/dev/null
 
-echo "Verifying signatures and weak framework link…"
+echo "Verifying signatures, universal binaries, and weak framework link…"
 codesign --verify --deep --strict "$OUT/UXTapFix.app"
 codesign --verify --deep --strict "$OUT/UXTapFix Setup.app"
+for binary in "$OUT/UXTapFix.app/Contents/MacOS/UXTapFix" "$OUT/UXTapFix Setup.app/Contents/MacOS/UXTapFixSetup"; do
+    archs="$(lipo -archs "$binary")"
+    [[ "$archs" == *arm64* && "$archs" == *x86_64* ]] || {
+        echo "Expected a universal binary, got: $archs" >&2
+        exit 1
+    }
+done
 otool -L "$OUT/UXTapFix.app/Contents/MacOS/UXTapFix" | grep -q 'MultitouchSupport.*weak'
 plutil -extract CFBundleShortVersionString raw "$OUT/UXTapFix.app/Contents/Info.plist" >/dev/null
 plutil -extract CFBundleShortVersionString raw "$OUT/UXTapFix Setup.app/Contents/Info.plist" >/dev/null

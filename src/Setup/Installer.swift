@@ -61,6 +61,7 @@ struct DaemonStatus {
 final class SetupModel: ObservableObject {
     enum Step: CaseIterable, Equatable {
         case welcome
+        case install
         case permissions
         case finish
     }
@@ -116,8 +117,8 @@ final class SetupModel: ObservableObject {
     @Published var status: DaemonStatus?
     @Published var busy = false
     @Published var installPhase: InstallPhase = .idle
+    @Published var installFailed = false
     @Published var errorMessage: String?
-    @Published var infoMessage: String?
     /// True only while System Settings is being opened. It does not stay on
     /// until macOS reports a grant, so a stale switch can be cleared again.
     @Published var permissionRequestBusy = false
@@ -255,16 +256,6 @@ final class SetupModel: ObservableObject {
 
     }
 
-    func showInfo(_ message: String, clearAfter seconds: TimeInterval = 4) {
-        infoMessage = message
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-            if infoMessage == message {
-                infoMessage = nil
-            }
-        }
-    }
-
     private func detectPermissionChange(in newStatus: DaemonStatus) {
         defer {
             previousAccessibility = newStatus.accessibility
@@ -280,14 +271,10 @@ final class SetupModel: ObservableObject {
         }
 
         restartingService = true
-        showInfo("Permission granted. Restarting UXTapFix so it takes effect…", clearAfter: 2)
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 700_000_000)
-            let restarted = restartService(quiet: true)
+            _ = restartService()
             restartingService = false
-            if restarted {
-                showInfo("Permission applied. You're good to go.")
-            }
         }
     }
 
@@ -296,6 +283,8 @@ final class SetupModel: ObservableObject {
     func goNext() {
         switch step {
         case .welcome:
+            beginInstall()
+        case .install:
             step = .permissions
         case .permissions:
             step = .finish
@@ -308,14 +297,26 @@ final class SetupModel: ObservableObject {
         switch step {
         case .welcome:
             break
-        case .permissions:
+        case .install:
             step = .welcome
+        case .permissions:
+            step = .install
         case .finish:
             step = .permissions
         }
     }
 
     // MARK: Install
+
+    /// Shows the Install step and starts copying right away, so the checklist
+    /// is what the user sees on the second screen.
+    func beginInstall() {
+        guard !busy else { return }
+        installFailed = false
+        installPhase = .copying
+        step = .install
+        Task { await install() }
+    }
 
     func install() async {
         guard !busy else { return }
@@ -326,7 +327,7 @@ final class SetupModel: ObservableObject {
             SetupActivity.shared.end()
         }
         errorMessage = nil
-        infoMessage = nil
+        installFailed = false
         installPhase = .copying
 
         do {
@@ -362,15 +363,11 @@ final class SetupModel: ObservableObject {
             await unregisterLegacyLoginItemIfNeeded()
             try await Task.sleep(nanoseconds: 650_000_000)
             refresh()
-            let healthy = await waitForFreshStatus(timeout: 5.0)
-            if healthy {
-                showInfo("UXTapFix is installed. Grant the permissions below.")
-            } else {
-                showInfo("UXTapFix is installed, but the background service hasn't reported yet. Check the log.", clearAfter: 8)
-            }
+            _ = await waitForFreshStatus(timeout: 5.0)
             step = .permissions
         } catch {
             installPhase = .idle
+            installFailed = true
             errorMessage = error.localizedDescription
             // Best effort: if the old app is still intact and launchd stopped
             // it, bring it back rather than leaving the user with no service.
@@ -695,7 +692,7 @@ final class SetupModel: ObservableObject {
     }
 
     @discardableResult
-    func restartService(quiet: Bool = false) -> Bool {
+    func restartService() -> Bool {
         guard installed else { return false }
         do {
             if !fileManager.fileExists(atPath: launchAgentURL.path) {
@@ -704,9 +701,6 @@ final class SetupModel: ObservableObject {
             restartingService = true
             try startService()
             launchAtLogin = true
-            if !quiet {
-                showInfo("Background service restarted.")
-            }
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 900_000_000)
                 restartingService = false
@@ -732,7 +726,6 @@ final class SetupModel: ObservableObject {
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 700_000_000)
             refresh()
-            showInfo("MiddleClick quit. UXTapFix now handles the three-finger gesture.")
         }
     }
 
@@ -744,7 +737,6 @@ final class SetupModel: ObservableObject {
                 try startService()
                 launchAtLogin = true
                 refresh()
-                showInfo("UXTapFix will start automatically when you log in.")
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -752,7 +744,6 @@ final class SetupModel: ObservableObject {
             _ = stopService()
             try? fileManager.removeItem(at: launchAgentURL)
             launchAtLogin = false
-            showInfo("UXTapFix won't start at login. You can turn it back on anytime.")
         }
     }
 
@@ -786,7 +777,6 @@ final class SetupModel: ObservableObject {
             _ = run("/usr/bin/tccutil", ["reset", kind.tccService, label])
         }
         permissionRequestBusy = true
-        infoMessage = nil
         openDaemon(arguments: [kind.requestArgument])
         let settingsURL = kind.settingsURL
         Task { @MainActor in

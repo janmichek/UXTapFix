@@ -53,9 +53,6 @@ typedef void (*MTFrameCallbackFunction)(
     int frame
 );
 
-bool MTDeviceIsAlive(MTDeviceRef) CF_SWIFT_NAME(getter:MTDevice.isAlive(self:));
-bool MTDeviceIsRunning(MTDeviceRef) CF_SWIFT_NAME(getter:MTDevice.isRunning(self:));
-
 bool MTRegisterContactFrameCallback(MTDeviceRef, MTFrameCallbackFunction)
     CF_SWIFT_NAME(MTDevice.register(self:contactFrameCallback:));
 bool MTUnregisterContactFrameCallback(MTDeviceRef, MTFrameCallbackFunction)

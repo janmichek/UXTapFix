@@ -8,8 +8,8 @@ OUT="${1:-$ROOT/dist}"
 DAEMON_APP="$OUT/UXTapFix.app"
 SETUP_APP="$OUT/UXTapFix Setup.app"
 BUILD="$ROOT/build"
-ARCH="$(uname -m)"
-TARGET="$ARCH-apple-macos13.0"
+# Build both slices so the release runs natively on Apple silicon and Intel.
+TARGETS=("arm64-apple-macos13.0" "x86_64-apple-macos13.0")
 VERSION="$(plutil -extract CFBundleShortVersionString raw "$ROOT/bundle/Info.plist")"
 SETUP_VERSION="$(plutil -extract CFBundleShortVersionString raw "$ROOT/bundle/Setup-Info.plist")"
 
@@ -34,16 +34,23 @@ cp "$ROOT/bundle/Info.plist" "$DAEMON_APP/Contents/Info.plist"
 cp "$BUILD/AppIcon.icns" "$DAEMON_APP/Contents/Resources/AppIcon.icns"
 plutil -lint "$DAEMON_APP/Contents/Info.plist" >/dev/null
 
-swiftc "$ROOT/src/UXTapFix.swift" \
-  -o "$DAEMON_APP/Contents/MacOS/UXTapFix" \
-  -O \
-  -target "$TARGET" \
-  -I "$ROOT/src/MultitouchSupport" \
-  -F /System/Library/PrivateFrameworks \
-  -Xlinker -weak_framework -Xlinker MultitouchSupport \
-  -framework Cocoa \
-  -framework ApplicationServices \
-  -framework ServiceManagement
+DAEMON_SLICES=()
+for target in "${TARGETS[@]}"; do
+  arch="${target%%-*}"
+  slice="$BUILD/UXTapFix-$arch"
+  swiftc "$ROOT/src/UXTapFix.swift" \
+    -o "$slice" \
+    -O \
+    -target "$target" \
+    -I "$ROOT/src/MultitouchSupport" \
+    -F /System/Library/PrivateFrameworks \
+    -Xlinker -weak_framework -Xlinker MultitouchSupport \
+    -framework Cocoa \
+    -framework ApplicationServices \
+    -framework ServiceManagement
+  DAEMON_SLICES+=("$slice")
+done
+lipo -create "${DAEMON_SLICES[@]}" -output "$DAEMON_APP/Contents/MacOS/UXTapFix"
 
 codesign --force --sign - "$DAEMON_APP"
 
@@ -61,20 +68,35 @@ cp "$ROOT/src/UXTapFix.swift" "$SETUP_APP/Contents/Resources/UXTapFix.swift"
 ditto "$ROOT/src/MultitouchSupport" "$SETUP_APP/Contents/Resources/MultitouchSupport"
 ditto "$ROOT/scripts" "$SETUP_APP/Contents/Resources/scripts"
 
-swiftc "$ROOT/src/Setup/"*.swift \
-  -o "$SETUP_APP/Contents/MacOS/UXTapFixSetup" \
-  -O \
-  -target "$TARGET" \
-  -parse-as-library \
-  -framework AppKit \
-  -framework SwiftUI \
-  -framework Combine
+SETUP_SLICES=()
+for target in "${TARGETS[@]}"; do
+  arch="${target%%-*}"
+  slice="$BUILD/UXTapFixSetup-$arch"
+  swiftc "$ROOT/src/Setup/"*.swift \
+    -o "$slice" \
+    -O \
+    -target "$target" \
+    -parse-as-library \
+    -framework AppKit \
+    -framework SwiftUI \
+    -framework Combine
+  SETUP_SLICES+=("$slice")
+done
+lipo -create "${SETUP_SLICES[@]}" -output "$SETUP_APP/Contents/MacOS/UXTapFixSetup"
 
 codesign --force --sign - "$SETUP_APP"
 
 # MARK: Verify
 codesign --verify --deep --strict "$DAEMON_APP"
 codesign --verify --deep --strict "$SETUP_APP"
+
+for binary in "$DAEMON_APP/Contents/MacOS/UXTapFix" "$SETUP_APP/Contents/MacOS/UXTapFixSetup"; do
+  archs="$(lipo -archs "$binary")"
+  [[ "$archs" == *arm64* && "$archs" == *x86_64* ]] || {
+    echo "Expected a universal binary, got: $archs" >&2
+    exit 1
+  }
+done
 
 echo ""
 echo "Built:"

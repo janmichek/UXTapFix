@@ -1,369 +1,117 @@
 # UXTapFix
 
-Middle-click (or three-finger tap/click) a Dock icon to quit that app.
-Middle-click a browser tab to close it — the trackpad gesture is built in, so
-you no longer need the MiddleClick helper app.
+A three-finger tap that closes tabs, opens links, and quits Dock apps.
 
-A tiny macOS background utility with a guided setup assistant. It installs
-entirely in your user folder, needs **no admin password**, and never phones
-home.
+- Close tabs and open links in a new tab with a 3-finger tap.
+- Tap a Dock icon with three fingers to quit the app.
+- Click or tap once to quit, or three times to force quit.
 
-```
-middle-click an app in the Dock  ->  the app quits
-middle-click a browser tab       ->  the tab closes
-```
+Setup installs a small background service in your user folder and helps you grant the permissions macOS requires. No admin password, and it never phones home. Requires **macOS 13** or later.
 
-## Requirements
+The trackpad gesture uses Apple's private `MultitouchSupport.framework` (weak-linked, not App Store compatible). A real middle-click mouse still quits Dock apps if that framework is missing.
 
-- macOS 13 Ventura or later.
-- Xcode Command Line Tools to build from source (`xcode-select --install`).
-  The prebuilt DMG needs neither Xcode nor admin rights.
+## Install
 
-The trackpad gesture uses Apple's private `MultitouchSupport.framework`, so
-this build is not App Store compatible. The Dock shortcut still works with any
-real middle-click mouse if Apple ever removes the private interface.
-
-## Quick start
-
-Build the app and its Setup assistant:
+From source (Xcode Command Line Tools: `xcode-select --install`):
 
 ```sh
 ./build.sh
 open "dist/UXTapFix Setup.app"
 ```
 
-Or use the convenience installer, which builds and opens the assistant:
+`./install.sh` builds and opens Setup. `./install.sh --no-build` uses the build already in `dist/`. `./install.sh --headless` installs the app and login item without UI; add `--force` to replace a newer install.
 
-```sh
-./install.sh
-```
+From a DMG, open **UXTapFix Setup.app**. The release is ad-hoc signed, not notarized. Verify the SHA-256 that `make-dmg.sh` prints against the downloaded file. If macOS blocks the app, right-click it and choose **Open**, or double-click **Install UXTapFix.command** (it copies Setup to a writable temp folder, clears quarantine, and opens it).
 
-On a Mac that already has a build in `dist/`, `./install.sh --no-build` skips
-the compile.
+`./make-dmg.sh` writes `dist/UXTapFix-2.4.dmg` with Setup, `Install UXTapFix.command`, and `Read Me.txt`. Setup embeds the daemon, so the DMG works without the repository. The release is a universal build for Apple silicon and Intel.
 
-If you downloaded a DMG, open **UXTapFix Setup.app**. Because the app is
-ad-hoc signed rather than notarized, macOS may say it cannot verify it the
-first time — right-click the app and choose **Open**, or double-click
-**Install UXTapFix.command**, which copies the Setup app to a writable
-temporary folder, clears the download quarantine flag there, and opens it.
-(A mounted DMG is read-only, so the flag cannot be cleared in place.)
+## Setup
 
-The release is ad-hoc signed, not notarized. Verify the SHA-256 printed by
-`make-dmg.sh` against the downloaded DMG before opening it; that is the only
-integrity check available for this distribution model.
-
-## What the Setup app does
-
-The assistant is a three-step native SwiftUI app:
-
-1. **Welcome** — animated previews of three features (a three-finger trackpad
-   tap synced to a middle click, quitting a Dock app, and a triple-click
-   force quit) plus a short summary. Click **Install** to copy
-   `UXTapFix.app` to `~/Applications` and add a per-user LaunchAgent. No
-   admin rights, no system-wide changes.
-2. **Permissions & Login** — opens the exact macOS privacy panes and shows
-   permission status live, read from the running background service. The
-   **Start UXTapFix when I log in** switch lives here too, so the utility is
-   ready every time you log in. You can turn it off at any time.
-3. **Finish** — shows a few gestures to try. **Finish** closes the assistant.
-
-The assistant copies itself to `~/Applications/UXTapFix Setup.app`, so
-you can reopen it later to review permission status. The footer has a **Close**
-button.
-
-If an old copy exists at `/Applications/UXTapFix.app`, Setup stops it,
-moves it to the Trash, and installs the new per-user build. Reopening Setup
-does the same when UXTapFix is already in `~/Applications`. An older
-DockMiddleQuit install is removed during setup so the two services are not
-both running.
+1. **Welcome** — previews of the three-finger tap, Dock quit, and triple-click force quit. **Install** starts installation.
+2. **Install** — starts right away and shows a live checklist: copies `UXTapFix.app` to `~/Applications` and adds a per-user LaunchAgent. An older copy in `/Applications` is moved to the Trash. A leftover DockMiddleQuit install is removed.
+3. **Setup** — opens System Settings for Accessibility and shows live status from the running service. **Start UXTapFix when I log in** is on this step. Turning it off stops the service and removes the login item.
+4. **Finish** — gestures to try. Setup also copies itself to `~/Applications/UXTapFix Setup.app`.
 
 ## Permissions
 
-macOS requires you to flip the Accessibility switch yourself; no app can do it for you.
+**Accessibility** is required. It lets UXTapFix see which Dock icon is under the pointer and create the event tap. macOS requires you to flip the switch yourself. After you do, Setup restarts the service; the daemon also retries the tap on its own.
 
-| Permission | Why | Required |
-| --- | --- | --- |
-| **Accessibility** | Ask macOS which Dock icon is under the pointer, and create the event tap that catches middle clicks. | Yes |
-| **Input Monitoring** | Not required for this active filtering tap. Accessibility authorizes it. | Built in |
+This build uses an active filtering tap, which Accessibility authorizes. It does not need a separate Input Monitoring entry. Leave `ListenEvent` alone; resetting it drops the app from that pane, and an ad-hoc build cannot reliably add itself back.
 
-Click **Open System Settings** on the Accessibility row. The assistant asks the
-daemon process to register with macOS, then opens the matching System Settings
-pane. The row updates within a couple of seconds after you flip the switch.
-
-macOS does not reliably list ad-hoc builds in the **Input Monitoring** pane.
-UXTapFix uses an active filtering event tap and posts synthetic clicks, both of
-which are authorized by Accessibility; it does not need a separate Input
-Monitoring entry for this build. Setup therefore shows a single Accessibility
-row. (A listen-only keyboard tap would require Input Monitoring instead.)
-
-### If the switch looks on but status stays off
-
-That usually means the permission belongs to an older build with a different
-code signature. Click **Open System Settings** again. While the service is
-reporting live status, Setup clears the stale Accessibility record with
-`tccutil` first so macOS can add the current app.
-
-The terminal equivalent:
+If System Settings shows Accessibility on but Setup stays off, the grant belongs to an older signature. Click **Open System Settings** again — Setup clears the stale record — or run:
 
 ```sh
 tccutil reset Accessibility com.user.uxtapfix
 ```
 
-Do **not** reset `ListenEvent`: it removes UXTapFix from the Input Monitoring
-list, and an ad-hoc build cannot reliably add itself back. The app does not
-need that entry.
+## Gestures
 
-After granting a permission, the assistant automatically restarts the service
-so the event tap picks it up. The daemon also retries the tap on its own, so a
-grant that lands after launch does not require a manual restart.
-
-## Launch at login
-
-Setup writes a per-user LaunchAgent:
-
-```
-~/Library/LaunchAgents/com.user.uxtapfix.plist
-```
-
-It starts UXTapFix when you log in and restarts it if it exits. Toggle
-**Start UXTapFix when I log in** on the **Permissions & Login** step to enable
-or disable it. Turning it off stops the service and removes the plist; nothing
-else is affected.
-
-## Three-finger tap and click
-
-UXTapFix turns a three-finger trackpad tap (or a physical click while
-three fingers are on the trackpad) into a real middle click. The middle click
-is posted system-wide, so the app under the pointer decides what to do:
-
-| Where you middle-click | What happens |
+| Where | What happens |
 | --- | --- |
-| A Dock icon | The app quits |
-| A browser tab (Chrome, Safari, Firefox, Arc, …) | The tab closes |
-| A link | The browser opens it in a background tab |
-| Terminal | Selected text is pasted |
+| Dock icon, once | The app quits and any leftover helpers stop. It is never force-quit, so a save sheet can stay open. |
+| Same Dock icon, twice | Same as once. There is no separate second-click action. |
+| Same Dock icon, 3× | Force quit. |
+| Browser tab | The tab closes (Chrome, Safari, Firefox, Arc, and most others). |
+| A link | Opens in a background tab. |
+| Terminal | Pastes the selection. |
 
-Repeating the middle-click on the same Dock icon:
+Clicks on one Dock icon count when each follows the last within your double-click speed (at least half a second). A single click waits that long; a third click force-quits immediately. Clicks outside the Dock are not counted or delayed.
 
-| Middle-clicks on one Dock icon | What happens |
-| --- | --- |
-| 1× | The app and any helpers it leaves behind quit; its Dock tile is cleared. The app is never force-quit — it gets as long as it needs for a save sheet or a slow shutdown. |
-| 2× | Same as a single click; there is no separate 2× action. |
-| 3× | The app and its helpers are force-quit immediately. |
+On macOS 26 and later, a quit app can linger in the Dock as **Running in Background**. UXTapFix then runs the Dock's **Stop Running in Background** command.
 
-On macOS 26 and later, a quit app can leave its Dock icon behind with a
-**Running in Background** label. After a normal or force quit, UXTapFix also
-presses the Dock's own **Stop Running in Background** command when that state
-is present, so the icon goes away instead of lingering.
+Quit MiddleClick if it is still installed (`brew uninstall --cask middleclick`); both apps would post a click. If a three-finger tap opens Look Up, set **System Settings → Trackpad → Point & Click → Look up & data detectors** to **Force Click with one finger**.
 
-Clicks count as a sequence when they follow each other within your Mac's
-double-click speed (about half a second by default), so a single click waits
-that long before the app quits. A third click or tap force-quits right away.
-Middle-clicks anywhere other than the Dock are never counted or delayed.
+Finder, Trash, Launchpad, and Mission Control are ignored. To allow quitting Finder (it relaunches immediately), set `middleClickAllowFinderQuit` or run `enable-finder-quit.sh`.
 
-The gesture is built in. You do **not** need MiddleClick anymore. If
-MiddleClick is still running, quit it first — otherwise one gesture produces
-two middle clicks. To remove it:
+Defaults live in `com.user.uxtapfix`. After a change:
 
 ```sh
-brew uninstall --cask middleclick
-```
-
-The defaults are three fingers and tap-to-click. You can change them:
-
-```sh
-defaults write com.user.uxtapfix middleClickEmulation -bool false
-defaults write com.user.uxtapfix middleClickFingers 4
-defaults write com.user.uxtapfix middleClickAllowMoreFingers -bool true
-defaults write com.user.uxtapfix middleClickTapToClick -bool false
-defaults write com.user.uxtapfix middleClickMaxTimeDelta 300
-defaults write com.user.uxtapfix middleClickMaxDistanceDelta 0.05
-defaults write com.user.uxtapfix middleClickMultiAction -bool false
-defaults write com.user.uxtapfix middleClickMultiClickWindow 500
-defaults write com.user.uxtapfix middleClickAllowFinderQuit -bool true
 launchctl kickstart -k gui/$(id -u)/com.user.uxtapfix
 ```
 
-- `middleClickEmulation false` disables the trackpad gesture but keeps the
-  Dock shortcut for a real middle-click mouse.
-- `middleClickFingers` accepts 2, 4, 5, or more. Values below 2 are clamped to
-  2; one-finger taps are never used. Two fingers conflicts with the normal
-  right-click gesture.
-- `middleClickAllowMoreFingers true` accepts the configured number or more.
-- `middleClickTapToClick false` keeps three-finger physical clicks but
-  disables the tap gesture.
-- `middleClickMaxTimeDelta` is milliseconds; `middleClickMaxDistanceDelta` is
-  in normalized trackpad units.
-- `middleClickMultiAction false` turns off the 3× force-quit escalation: a
-  single click quits immediately and extra clicks behave like single clicks.
-- `middleClickMultiClickWindow` is milliseconds, minimum 150. It is the
-  longest gap allowed between repeated clicks on the same Dock icon. By
-  default it follows your Mac's double-click setting (at least 500 ms), so
-  normal triple-clicks with a mouse are counted reliably.
-- `middleClickAllowFinderQuit` is `false` by default. Set it to `true` (or run
-  `enable-finder-quit.sh`) if you want middle-click to quit Finder; Finder
-  relaunches immediately, so this is mostly useful for testing.
+| Key | Default | |
+| --- | --- | --- |
+| `middleClickEmulation` | `true` | Trackpad gesture. `false` keeps a real middle-click mouse. |
+| `middleClickFingers` | `3` | `2` or more. Two fingers conflicts with right-click. |
+| `middleClickAllowMoreFingers` | `false` | Accept the configured count or more. |
+| `middleClickTapToClick` | `true` | `false` keeps physical multi-finger clicks only. |
+| `middleClickMaxTimeDelta` | `300` | Milliseconds. |
+| `middleClickMaxDistanceDelta` | `0.05` | Normalized trackpad units. |
+| `middleClickMultiAction` | `true` | `false` quits on the first click and skips force-quit. |
+| `middleClickMultiClickWindow` | system | Milliseconds, minimum 150. Follows the double-click interval, at least 500, unless set. |
+| `middleClickAllowFinderQuit` | `false` | Finder relaunches immediately. |
 
-If macOS opens Look Up on a three-finger tap, both actions can fire. Set
-**System Settings → Trackpad → Point & Click → Look up & data detectors** to
-**Force Click with one finger** to avoid the conflict.
-
-The gesture relies on Apple's private `MultitouchSupport.framework`. It is not
-App Store compatible and may stop working after a macOS update. The framework
-is weak-linked: if it is missing, UXTapFix still launches and the Dock shortcut
-keeps working with a real middle-click mouse; only the trackpad gesture is
-disabled. If Apple changes the framework's ABI, the gesture may still break.
-
-## Installed locations
+## Files
 
 | What | Where |
 | --- | --- |
-| Background app | `~/Applications/UXTapFix.app` |
-| Setup assistant | `~/Applications/UXTapFix Setup.app` |
+| App | `~/Applications/UXTapFix.app` |
+| Setup | `~/Applications/UXTapFix Setup.app` |
 | Login item | `~/Library/LaunchAgents/com.user.uxtapfix.plist` |
-| Live status | `~/Library/Application Support/UXTapFix/status.json` |
-| Helper scripts | `~/Library/Application Support/UXTapFix/` |
+| Status | `~/Library/Application Support/UXTapFix/status.json` |
+| Scripts | `status.sh`, `restart.sh`, `uninstall.sh`, `enable-finder-quit.sh` in that folder |
 | Log | `~/Library/Logs/UXTapFix.log` |
 
-The daemon rewrites `status.json` every two seconds with its version, PID,
-permission state, event-tap state, and last quit. The Setup app polls that file
-instead of guessing.
+`status.json` is rewritten every two seconds with version, PID, permissions, event-tap state, and the last quit. Setup reads that file.
 
-## Terminal install (headless)
-
-For CI, remote setup, or people who prefer scripts:
+Uninstall lists what it will remove and asks first. `--yes` skips the prompt:
 
 ```sh
-./install.sh --headless
-```
-
-This builds the daemon, stages and verifies the new app, stops any old copy,
-removes legacy DockMiddleQuit leftovers, migrates a legacy
-`/Applications/UXTapFix.app` to the Trash, atomically swaps in the app, installs
-the LaunchAgent, starts the service, and prints the permission step. It also
-copies the Setup app into `~/Applications` so the guided permission screens are
-available afterward. A newer installed build is never silently downgraded;
-pass `--force` only if that is intentional.
-
-The scripts in `scripts/` are installed alongside the app:
-
-```sh
-~/Library/Application\ Support/UXTapFix/status.sh
-~/Library/Application\ Support/UXTapFix/restart.sh
 ~/Library/Application\ Support/UXTapFix/uninstall.sh
-~/Library/Application\ Support/UXTapFix/enable-finder-quit.sh
 ```
 
-## Development checks
+That stops the service and removes the app, Setup, login item, helpers, log, and privacy records.
+
+If a click does nothing, check the log, grant Accessibility, and run `restart.sh`. `CGEventTap failed` means the tap is waiting on Accessibility. `Three-finger middle-click enabled` means the trackpad gesture started; if the log says no device was found, reconnect the trackpad and restart.
+
+## Develop
 
 ```sh
 ./tests/smoke.sh
 ```
 
-This checks shell/plist syntax, type-checks both Swift targets, builds both apps
-into a temporary directory, verifies their signatures, and asserts that
-`MultitouchSupport` is weak-linked.
+The smoke test checks syntax, type-checks and builds both apps, verifies signatures, and asserts `MultitouchSupport` is weak-linked.
 
-## Build a DMG
+The daemon is `src/UXTapFix.swift` plus a header in `src/MultitouchSupport/`. Setup is SwiftUI in `src/Setup/`. `build.sh` compiles with `swiftc` and ad-hoc signs both apps. There is no Xcode project.
 
-```sh
-./make-dmg.sh
-```
-
-The script builds both apps and produces
-`dist/UXTapFix-2.3.dmg` with:
-
-- `UXTapFix Setup.app` (the self-contained installer, daemon embedded)
-- `Install UXTapFix.command` (copies the Setup app to a writable temp folder,
-  clears quarantine there, then opens it)
-- `Read Me.txt`
-
-The Setup app embeds the daemon, icon, source, and helper scripts, so it works
-from the DMG without the repository.
-
-## How it works
-
-1. A `CGEventTap` listens for `otherMouseDown` with button number 2 (middle
-   click). It swallows the click when the pointer is over the Dock so the Dock
-   context menu does not flash. Accessibility grants both listen and post
-   access; if the tap cannot be created, an `NSEvent` global monitor is a
-   passive fallback.
-2. The private `MultitouchSupport.framework` reports trackpad touch frames. A
-   short, still three-finger tap posts a real middle click at the pointer. A
-   physical left/right click while three fingers are down is rewritten in the
-   event tap to a middle click. Browsers and other apps then handle it
-   natively — UXTapFix does not script browsers.
-3. On each middle click, the Accessibility API resolves the element under the
-   pointer (`AXUIElementCopyElementAtPosition`) and checks for `AXDockItem`.
-4. The icon title is matched to a running app and quit with
-   `NSRunningApplication.terminate()`. A normal quit waits for the app to exit
-   on its own; only a triple-click calls `forceTerminate()`.
-5. `Trash`, `Launchpad`, `Mission Control`, and `Finder` are ignored. Finder
-   relaunches immediately; `scripts/enable-finder-quit.sh` flips a preference
-   that allows it if you really want that.
-
-The daemon is one Swift file (`src/UXTapFix.swift`) plus a minimal
-private-framework header in `src/MultitouchSupport/`. The Setup app is SwiftUI
-in `src/Setup/`. Both are built with `swiftc` and ad-hoc signed by `build.sh`;
-there is no Xcode project.
-
-## Troubleshooting
-
-**The Setup app will not open.** macOS quarantined the ad-hoc signed download.
-Right-click → **Open**, or run `Install UXTapFix.command`.
-
-**Accessibility says granted in System Settings but the app says otherwise.**
-Click **Open System Settings** again. Rebuilding produces a new ad-hoc
-signature, so old approvals can be stale.
-
-**Middle-click does nothing.** Check `~/Library/Logs/UXTapFix.log`. Grant
-Accessibility, then run
-`~/Library/Application\ Support/UXTapFix/restart.sh`. If the log says
-`CGEventTap failed`, the event tap is waiting for Accessibility. Input
-Monitoring is included with Accessibility and does not need a separate grant.
-
-**Three-finger tap does nothing.** Check the log for
-`Three-finger middle-click enabled`. If it says no multitouch device was found,
-make sure the trackpad is connected and restart the service. Also quit
-MiddleClick if it is still running: two gesture apps both post a click. If the
-gesture is disabled, run
-`defaults write com.user.uxtapfix middleClickEmulation -bool true` and
-restart.
-
-**Three-finger tap opens Look Up instead.** Set **System Settings → Trackpad →
-Point & Click → Look up & data detectors** to **Force Click with one finger**.
-
-**A browser tab does not close.** The browser decides what a middle click
-does; UXTapFix only posts the click. Test with a mouse that has a real
-middle button. Chrome, Safari, Firefox, Arc, and most other browsers close a
-tab when its tab is middle-clicked.
-
-**The service is stopped.** Open the Permissions & Login step and make sure
-**Start UXTapFix when I log in** is on. You can also run
-`~/Library/Application\ Support/UXTapFix/restart.sh`.
-
-**I want to see what it is doing.** Check the live status file:
-
-```sh
-cat ~/Library/Application\ Support/UXTapFix/status.json
-tail -f ~/Library/Logs/UXTapFix.log
-```
-
-**Finder does not quit.** That is intentional: Finder immediately relaunches.
-See `enable-finder-quit.sh` if you want to allow it anyway.
-
-## Uninstall
-
-Run the terminal uninstaller. It lists what it will remove and asks before
-deleting anything. Pass `--yes` to skip that prompt:
-
-```sh
-~/Library/Application\ Support/UXTapFix/uninstall.sh
-~/Library/Application\ Support/UXTapFix/uninstall.sh --yes
-```
-
-That stops the service and removes the app, Setup app, login item, helper
-files, log, and privacy records.
-
-The project is ad-hoc signed and not notarized. It requests no network access
-and stores nothing beyond the local status/log files listed above.
+A `CGEventTap` catches middle click (button 2) and swallows it over the Dock. `MultitouchSupport` turns a short three-finger tap, or a click with three fingers down, into that same click. Accessibility resolves the `AXDockItem` under the pointer. One click calls `terminate()`; three calls `forceTerminate()`. If the tap cannot be created, an `NSEvent` monitor is the fallback. UXTapFix posts the click; the app under the pointer decides what it means.

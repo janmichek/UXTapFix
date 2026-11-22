@@ -108,8 +108,9 @@ struct StepProgress: View {
     let current: SetupModel.Step
 
     private let steps: [(SetupModel.Step, String)] = [
-        (.welcome, "Install"),
-        (.permissions, "Permissions & Login"),
+        (.welcome, "Welcome"),
+        (.install, "Install"),
+        (.permissions, "Setup"),
         (.finish, "Finish")
     ]
 
@@ -344,7 +345,7 @@ struct SetupFooter<Content: View>: View {
 }
 
 /// Button title with an SF Symbol placed before or after the text. Used by the
-/// footer so Back, Next and Close read the same way on every step.
+/// footer so Back and Next read the same way on every step.
 struct ActionLabel: View {
     let title: String
     let systemName: String

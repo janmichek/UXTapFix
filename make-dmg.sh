@@ -29,7 +29,7 @@ cat > "$STAGE/Read Me.txt" <<'README'
 UXTapFix
 ==============
 
-Middle-click (or three-finger tap) a Dock icon to quit that app.
+Three-finger tap a Dock icon to quit that app.
 
 This release is ad-hoc signed, not notarized. `make-dmg.sh` prints the DMG
 SHA-256; verify it against the downloaded file before opening.
@@ -40,8 +40,8 @@ INSTALL
    If macOS says it can't verify the app, right-click it and choose Open.
    That warning appears because this build is ad-hoc signed, not notarized.
 
-2. Follow the three steps:
-   Welcome -> Permissions & Login -> Finish.
+2. Follow the four steps:
+   Welcome -> Install -> Setup -> Finish.
 
    No admin password is needed. The app is installed in your user folder:
    ~/Applications/UXTapFix.app
@@ -54,8 +54,8 @@ PERMISSIONS
 -----------
 macOS requires you to approve Accessibility manually. This build uses an
 active event tap, so Input Monitoring is not needed as a separate switch.
-The Permissions & Login step also has the switch that starts UXTapFix when
-you log in. Leave it on so the utility keeps running in the background.
+The Setup step also has the switch that starts UXTapFix when you log in.
+Leave it on so the utility keeps running in the background.
 
 The Setup app opens the exact System Settings pane and updates live when the
 switch is on. If Accessibility already looks on but status stays off, click

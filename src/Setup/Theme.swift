@@ -61,10 +61,14 @@ enum SetupColors {
 
 struct SetupCard<Content: View>: View {
     var padding: CGFloat = 16
+    /// Optional tint for cards that need to stand out from the rest of the
+    /// page, such as an unmet permission. `nil` keeps the neutral card chrome.
+    var tint: Color?
     private let content: Content
 
-    init(padding: CGFloat = 16, @ViewBuilder content: () -> Content) {
+    init(padding: CGFloat = 16, tint: Color? = nil, @ViewBuilder content: () -> Content) {
         self.padding = padding
+        self.tint = tint
         self.content = content()
     }
 
@@ -73,14 +77,36 @@ struct SetupCard<Content: View>: View {
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: SetupStyle.cardCornerRadius, style: .continuous)
-                    .fill(SetupColors.card)
+                ZStack {
+                    RoundedRectangle(cornerRadius: SetupStyle.cardCornerRadius, style: .continuous)
+                        .fill(SetupColors.card)
+                    if let tint {
+                        RoundedRectangle(cornerRadius: SetupStyle.cardCornerRadius, style: .continuous)
+                            .fill(tint.opacity(0.09))
+                    }
+                }
             )
             .overlay(
                 RoundedRectangle(cornerRadius: SetupStyle.cardCornerRadius, style: .continuous)
-                    .strokeBorder(SetupColors.border, lineWidth: 1)
+                    .strokeBorder(
+                        tint?.opacity(0.45) ?? SetupColors.border,
+                        lineWidth: tint == nil ? 1 : 1.5
+                    )
             )
-            .shadow(color: .black.opacity(0.045), radius: 7, y: 2)
+            .overlay(alignment: .leading) {
+                if let tint {
+                    Capsule()
+                        .fill(tint)
+                        .frame(width: 3)
+                        .padding(.vertical, 14)
+                        .padding(.leading, 1)
+                }
+            }
+            .shadow(
+                color: (tint ?? .black).opacity(tint == nil ? 0.045 : 0.16),
+                radius: 8,
+                y: 2
+            )
     }
 }
 
@@ -217,6 +243,10 @@ struct StatusLabel: View {
                 .font(.system(size: 12, weight: .semibold))
         }
         .foregroundStyle(kind.color)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(kind.color.opacity(0.14)))
+        .overlay(Capsule().strokeBorder(kind.color.opacity(0.30), lineWidth: 1))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(text))
     }

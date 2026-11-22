@@ -431,7 +431,7 @@ struct PermissionsView: View {
                     StepHeader(
                         step: .permissions,
                         title: "Setup",
-                        subtitle: "macOS asks for Accessibility before UXTapFix can see Dock clicks."
+                        subtitle: "macOS asks for Accessibility before UXTapFix can see Dock clicks. Setup can't continue until it is granted."
                     )
 
                     if model.launchAtLogin && !model.serviceRunning {
@@ -452,7 +452,10 @@ struct PermissionsView: View {
                         )
                     }
 
-                    SetupCard(padding: SetupStyle.cardPadding) {
+                    SetupCard(
+                        padding: SetupStyle.cardPadding,
+                        tint: model.accessibilityGranted ? nil : .orange
+                    ) {
                         PermissionRow(
                             kind: .accessibility,
                             granted: model.accessibilityGranted,
@@ -466,8 +469,15 @@ struct PermissionsView: View {
                             IconTile(systemName: "power", tint: model.launchAtLogin ? SetupColors.accent : .secondary)
 
                             VStack(alignment: .leading, spacing: 6) {
-                                Text("Start UXTapFix when I log in")
-                                    .font(SetupFont.headline)
+                                HStack(spacing: 8) {
+                                    Text("Start UXTapFix when I log in")
+                                        .font(SetupFont.headline)
+
+                                    if model.launchAtLogin {
+                                        StatusLabel(text: "Opens on login", kind: .granted)
+                                            .transition(.opacity)
+                                    }
+                                }
                                 Text("Runs quietly in the background and restarts if it stops.")
                                     .font(SetupFont.body)
                                     .foregroundStyle(.secondary)
@@ -484,6 +494,7 @@ struct PermissionsView: View {
                             .toggleStyle(.switch)
                         }
                         .frame(minHeight: SetupStyle.rowMinHeight)
+                        .animation(.easeInOut(duration: 0.18), value: model.launchAtLogin)
                     }
 
                     if !model.launchAtLogin {
@@ -508,18 +519,28 @@ struct PermissionsView: View {
 
                 Spacer()
 
+                if !model.accessibilityGranted {
+                    HStack(spacing: 6) {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text("Grant Accessibility to continue")
+                            .font(SetupFont.secondary)
+                    }
+                    .foregroundStyle(.secondary)
+                    .transition(.opacity)
+                }
+
                 Button {
                     model.goNext()
                 } label: {
-                    ActionLabel(
-                        title: model.accessibilityGranted ? "Next" : "Next Anyway",
-                        systemName: "arrow.right",
-                        iconAfter: true
-                    )
+                    ActionLabel(title: "Next", systemName: "arrow.right", iconAfter: true)
                 }
                 .buttonStyle(SetupButtonStyle(prominent: true))
+                .disabled(!model.accessibilityGranted)
+                .help(model.accessibilityGranted ? "" : "Grant Accessibility access to continue.")
                 .keyboardShortcut(.defaultAction)
             }
+            .animation(.easeInOut(duration: 0.18), value: model.accessibilityGranted)
         }
     }
 }
@@ -538,9 +559,13 @@ struct PermissionRow: View {
         granted ? "Granted" : "Required"
     }
 
+    private var tint: Color {
+        granted ? SetupColors.accent : .orange
+    }
+
     var body: some View {
         HStack(alignment: .center, spacing: SetupStyle.itemSpacing) {
-            IconTile(systemName: kind.icon)
+            IconTile(systemName: kind.icon, tint: tint)
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
@@ -554,6 +579,18 @@ struct PermissionRow: View {
                     .font(SetupFont.body)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+
+                if !granted {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(tint)
+                        Text("In System Settings, turn on UXTapFix under Privacy & Security → Accessibility.")
+                            .font(SetupFont.secondary)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }
 
             Spacer(minLength: 12)
@@ -566,11 +603,12 @@ struct PermissionRow: View {
                         Text(waiting ? "Waiting for approval…" : "Open System Settings")
                     }
                 }
-                .buttonStyle(SetupButtonStyle())
+                .buttonStyle(SetupButtonStyle(prominent: true))
                 .disabled(waiting)
             }
         }
         .frame(minHeight: SetupStyle.rowMinHeight)
+        .animation(.easeInOut(duration: 0.18), value: granted)
     }
 }
 

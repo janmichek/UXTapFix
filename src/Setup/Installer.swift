@@ -287,6 +287,9 @@ final class SetupModel: ObservableObject {
         case .install:
             step = .permissions
         case .permissions:
+            // The footer button is disabled until macOS reports the grant;
+            // guard here too so no other path can skip the permission.
+            guard accessibilityGranted else { return }
             step = .finish
         case .finish:
             NSApp.terminate(nil)

@@ -24,6 +24,8 @@
     <true/>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Needed to quit apps via AppleScript.</string>
     <key>NSAccessibilityUsageDescription</key>
     <string>Needed to detect the Dock icon under the cursor.</string>
 </dict>

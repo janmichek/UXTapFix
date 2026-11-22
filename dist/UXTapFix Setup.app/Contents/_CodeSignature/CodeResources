@@ -10,7 +10,7 @@
 		</data>
 		<key>Resources/MultitouchSupport/MultitouchSupport.h</key>
 		<data>
-		rKadoTtk/viq7s6sGe4XqgyAS7Y=
+		JL2bnWH/zmu2G8chgzn8wJ7YUEE=
 		</data>
 		<key>Resources/MultitouchSupport/module.modulemap</key>
 		<data>
@@ -18,11 +18,11 @@
 		</data>
 		<key>Resources/UXTapFix.app/Contents/Info.plist</key>
 		<data>
-		ltdhV99FEUTQv1gamN+E+uF9QC0=
+		Ju1oSqkUbd00SkdLxMSW6RpRsSk=
 		</data>
 		<key>Resources/UXTapFix.app/Contents/MacOS/UXTapFix</key>
 		<data>
-		lpl594RxpFwiM4EcY7fLRLBiFv0=
+		UnzDu8n0ChTNNNKJx5WztWm+MR4=
 		</data>
 		<key>Resources/UXTapFix.app/Contents/Resources/AppIcon.icns</key>
 		<data>
@@ -34,19 +34,19 @@
 		</data>
 		<key>Resources/UXTapFix.swift</key>
 		<data>
-		y6npapqodQmHlV4454jQ9YqZFrU=
+		CS9rAzeLp5KH+CFGubIiHPC1xOI=
 		</data>
 		<key>Resources/scripts/README.txt</key>
 		<data>
-		BRukY5ZWmTBVenfLrCvo436zdM4=
+		iUdyTZKhPo46zqCZtySNMYZIp04=
 		</data>
 		<key>Resources/scripts/enable-finder-quit.sh</key>
 		<data>
-		s8uyUltZQMISt7pKDxw7d8XJJ/Y=
+		Zw1bSWH0RJ8FMKIZhS6UsUd8n5o=
 		</data>
 		<key>Resources/scripts/restart.sh</key>
 		<data>
-		87Wmi8w+XbiSiVSwjAFy+bEPLdc=
+		ZtGV8cX8m3bNKwGtDy0UoMwYQ20=
 		</data>
 		<key>Resources/scripts/status.sh</key>
 		<data>
@@ -54,7 +54,7 @@
 		</data>
 		<key>Resources/scripts/uninstall.sh</key>
 		<data>
-		W1LWR0+YVLNqhyiROi6V3c18PVk=
+		I8iqnDWPn3mIyRHzpqAzse1uhXA=
 		</data>
 	</dict>
 	<key>files2</key>
@@ -70,7 +70,7 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			k4PlJPPYYQHq8LT2NqtlWfpSLEyenreUA4U3wrf90sY=
+			U3/pw5OoL60+kVrfsZ2ECYi+yqGO7ygNVxVL0Tuo9gM=
 			</data>
 		</dict>
 		<key>Resources/MultitouchSupport/module.modulemap</key>
@@ -84,14 +84,14 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			vHaqCQNIRVBQJOmpfUFOa2CPUqFH2jG5Smj5v+x4PM4=
+			zEKkgCidGUZpzBWxrtyQgv08/ci1uIo3dk37uxi1A/M=
 			</data>
 		</dict>
 		<key>Resources/UXTapFix.app/Contents/MacOS/UXTapFix</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			xx7yb/oMQbHiqkSR98D7IZ/DjH0R6ujQsYf7sZAPsCU=
+			OJ+o1nv/UE1rRiRdmYSmwfp+puf4Q/HODVPMdNGFiHw=
 			</data>
 		</dict>
 		<key>Resources/UXTapFix.app/Contents/Resources/AppIcon.icns</key>
@@ -112,28 +112,28 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			Q+rMg8KHc9tzG11yctkoB8sPLrq3lNxvg5HNQHa16b0=
+			CDR2F1H0oprLpQ9I1vzW+oYNaPcCpvJKyl2JLc1biUU=
 			</data>
 		</dict>
 		<key>Resources/scripts/README.txt</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			/C5j33/mVVsKFOJY89LC4YJkPPxRn7VXUe7J0e0ooDU=
+			wQEjVyltnmlUHnZAqcjz6y+tWIQIIwOOv87SXOCBlnY=
 			</data>
 		</dict>
 		<key>Resources/scripts/enable-finder-quit.sh</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			YL/4pijj88jWcp9vusxk+NR+yQh5sMID9u6FPggP0zk=
+			VGwYhQni460IgS0bqzBqbjBwnWuQriO6iHYtbJBkCKo=
 			</data>
 		</dict>
 		<key>Resources/scripts/restart.sh</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			02LiBvXu57VZpuDlOCOZev+LmhLIxOzh1h/jQw6C7mo=
+			CCNAYjovR5Z98fmIovzszkQ2CQaXLhUittPFqRgK55Y=
 			</data>
 		</dict>
 		<key>Resources/scripts/status.sh</key>
@@ -147,7 +147,7 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			9nXisK3f0tHawTTwmsBj2M5nLBbCfAPfP+CO3cAOnoA=
+			5kkmMoH2vt+HfHtF6tPALQiU4SZyfOQHRo7hdHyEx+c=
 			</data>
 		</dict>
 	</dict>

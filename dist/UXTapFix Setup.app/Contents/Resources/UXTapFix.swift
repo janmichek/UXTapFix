@@ -14,7 +14,7 @@ import MultitouchSupport
 import ServiceManagement
 setlinebuf(stdout)
 
-let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "2.3"
+let appVersion = "2.3"
 let supportDirectory = FileManager.default.homeDirectoryForCurrentUser
     .appendingPathComponent("Library/Application Support/UXTapFix", isDirectory: true)
 let statusFileURL = supportDirectory.appendingPathComponent("status.json")
@@ -43,35 +43,9 @@ var reportedStatusWriteFailure = false
 //   middleClickMultiAction      Bool    default true
 //   middleClickMultiClickWindow Double  default: system double-click interval
 //                                       (minimum 500 milliseconds, can be overridden; floor 150)
-//   middleClickAllowFinderQuit  Bool    default false
 
 @_silgen_name("MTDeviceCreateList")
 private func MTDeviceCreateList() -> Unmanaged<CFMutableArray>?
-
-/// Load the private framework ourselves. The build weak-links it so a future
-/// macOS release that removes it cannot stop the daemon from launching; the
-/// trackpad feature simply stays off until the framework is present again.
-private let multitouchFrameworkHandle: UnsafeMutableRawPointer? = {
-    let paths = [
-        "/System/Library/PrivateFrameworks/MultitouchSupport.framework/MultitouchSupport",
-        "/System/Library/PrivateFrameworks/MultitouchSupport.framework/Versions/A/MultitouchSupport"
-    ]
-    let requiredSymbols = [
-        "MTDeviceCreateList",
-        "MTRegisterContactFrameCallback",
-        "MTUnregisterContactFrameCallback",
-        "MTDeviceStart",
-        "MTDeviceStop"
-    ]
-    for path in paths {
-        guard let handle = dlopen(path, RTLD_LAZY) else { continue }
-        if requiredSymbols.allSatisfy({ dlsym(handle, $0) != nil }) {
-            return handle
-        }
-        _ = dlclose(handle)
-    }
-    return nil
-}()
 
 private let touchCallback: MTFrameCallbackFunction = { _, touches, count, _, _ in
     MiddleClickEmulator.shared.handleFrame(touches, count: count)
@@ -93,15 +67,10 @@ final class MiddleClickEmulator {
 
     private let lock = NSLock()
     private var fingersDown = false
-    /// A physical left/right click is being rewritten to a middle click, and
-    /// the matching mouse-up has not arrived yet.
-    private var rewritingPhysicalClick = false
+    private var wasFingersDown = false
     private var clickStartedAt: TimeInterval = 0
     // Set when a physical click is rewritten, so the tap does not also post.
     private var lastPhysicalClickAt: TimeInterval = 0
-    /// A physical click happened during this gesture. Even a slow click must not
-    /// produce a second emulated click when the fingers finally lift.
-    private var physicalClickDuringGesture = false
 
     // MARK: Touch state
 
@@ -126,13 +95,9 @@ final class MiddleClickEmulator {
         }
 
         enabled = boolValue("middleClickEmulation", default: true)
-        let configuredFingerCount = defaults.object(forKey: "middleClickFingers") == nil
-            ? 3
-            : defaults.integer(forKey: "middleClickFingers")
-        fingerCount = max(2, configuredFingerCount)
-        if configuredFingerCount < 2 {
-            print("[UXTapFix] middleClickFingers must be at least 2; using 2.")
-        }
+        fingerCount = max(1, defaults.object(forKey: "middleClickFingers") == nil
+                          ? 3
+                          : defaults.integer(forKey: "middleClickFingers"))
         allowMoreFingers = boolValue("middleClickAllowMoreFingers", default: false)
         tapToClick = boolValue("middleClickTapToClick", default: true)
         maxTimeDelta = max(0.05, doubleValue("middleClickMaxTimeDelta", default: 300) / 1000)
@@ -145,10 +110,6 @@ final class MiddleClickEmulator {
     func start() -> Bool {
         guard enabled else {
             print("[UXTapFix] Three-finger middle-click disabled by preference.")
-            return false
-        }
-        guard multitouchFrameworkHandle != nil else {
-            print("[UXTapFix] MultitouchSupport.framework unavailable; the trackpad shortcut is disabled.")
             return false
         }
 
@@ -172,11 +133,6 @@ final class MiddleClickEmulator {
         lock.lock()
         let list = devices
         devices.removeAll()
-        fingersDown = false
-        rewritingPhysicalClick = false
-        physicalClickDuringGesture = false
-        tapStart = nil
-        gestureIsValid = false
         lock.unlock()
 
         for device in list {
@@ -191,7 +147,7 @@ final class MiddleClickEmulator {
     }
 
     private func registerDevices() -> Bool {
-        let list = MTDeviceCreateList()?.takeRetainedValue() as? [MTDevice] ?? []
+        let list = MTDeviceCreateList()?.takeUnretainedValue() as? [MTDevice] ?? []
         guard !list.isEmpty else {
             if !loggedRegistrationFailure {
                 loggedRegistrationFailure = true
@@ -266,8 +222,7 @@ final class MiddleClickEmulator {
         defer { lock.unlock() }
         guard enabled, fingersDown else { return false }
         fingersDown = false
-        rewritingPhysicalClick = true
-        physicalClickDuringGesture = true
+        wasFingersDown = true
         clickStartedAt = now
         lastPhysicalClickAt = now
         return true
@@ -278,8 +233,8 @@ final class MiddleClickEmulator {
         let now = ProcessInfo.processInfo.systemUptime
         lock.lock()
         defer { lock.unlock() }
-        guard rewritingPhysicalClick else { return false }
-        rewritingPhysicalClick = false
+        guard wasFingersDown else { return false }
+        wasFingersDown = false
         // A missed mouse-up should not rewrite a much later click.
         return now - clickStartedAt <= 5
     }
@@ -300,21 +255,18 @@ final class MiddleClickEmulator {
             let distance = manhattan(startPosition, currentPosition)
             let naturalClickGuard = maxTimeDelta * 0.75
             let recentlyClicked = now - lastPhysicalClickAt <= naturalClickGuard
-            let physicalClick = physicalClickDuringGesture
             let canPost = tapToClick
                 && gestureIsValid
                 && duration <= maxTimeDelta
                 && distance <= maxDistanceDelta
                 && !recentlyClicked
-                && !physicalClick
                 && now - lastEmulatedAt > maxTimeDelta * 0.3
 
             tapStart = nil
             gestureIsValid = false
             fingersDown = false
-            physicalClickDuringGesture = false
             if now - clickStartedAt > 5 {
-                rewritingPhysicalClick = false
+                wasFingersDown = false
             }
             if canPost { lastEmulatedAt = now }
             lock.unlock()
@@ -340,7 +292,6 @@ final class MiddleClickEmulator {
             startPosition = average
             currentPosition = average
             gestureIsValid = true
-            physicalClickDuringGesture = false
             fingersDown = true
             lock.unlock()
             return
@@ -358,7 +309,6 @@ final class MiddleClickEmulator {
         if !allowMoreFingers && fingerTotal > fingerCount {
             tapStart = nil
             gestureIsValid = false
-            physicalClickDuringGesture = false
             fingersDown = false
             lock.unlock()
             return
@@ -424,6 +374,12 @@ func inputMonitoringGranted() -> Bool {
     CGPreflightListenEventAccess() || accessibilityGranted()
 }
 
+func printJSON(_ object: [String: Any]) {
+    guard let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
+          let text = String(data: data, encoding: .utf8) else { return }
+    print(text)
+}
+
 // MARK: - Status reporting (read by the Setup app)
 
 func writeStatus() {
@@ -432,7 +388,7 @@ func writeStatus() {
         "pid": Int(getpid()),
         "accessibility": accessibilityGranted(),
         "inputMonitoring": inputMonitoringGranted(),
-        "eventTapActive": eventTap.map { CGEvent.tapIsEnabled(tap: $0) } ?? false,
+        "eventTapActive": eventTap != nil,
         "middleClickEmulation": MiddleClickEmulator.shared.isRunning,
         "middleClickEnabled": MiddleClickEmulator.shared.enabled,
         "middleClickFingers": MiddleClickEmulator.shared.fingerCount,
@@ -474,6 +430,20 @@ func startStatusHeartbeat() {
 // Keep these before any event-tap setup so another app instance can request a
 // permission prompt without becoming a second background service.
 
+if CommandLine.arguments.contains("--version") {
+    print(appVersion)
+    exit(0)
+}
+
+if CommandLine.arguments.contains("--check") {
+    printJSON([
+        "version": appVersion,
+        "accessibility": accessibilityGranted(),
+        "inputMonitoring": inputMonitoringGranted()
+    ])
+    exit(0)
+}
+
 if CommandLine.arguments.contains("--request-accessibility") {
     print("[UXTapFix] Requesting Accessibility access…")
     let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
@@ -484,6 +454,19 @@ if CommandLine.arguments.contains("--request-accessibility") {
     // Give the system prompt a moment to remain on screen before this helper exits.
     RunLoop.main.run(until: Date().addingTimeInterval(alreadyGranted ? 0.2 : 4.0))
     exit(alreadyGranted ? 0 : 2)
+}
+
+if CommandLine.arguments.contains("--request-input-monitoring") {
+    let alreadyGranted = inputMonitoringGranted()
+    if !alreadyGranted {
+        print("[UXTapFix] Requesting Input Monitoring access…")
+        _ = CGRequestListenEventAccess()
+    }
+    print(inputMonitoringGranted()
+          ? "[UXTapFix] Input Monitoring granted ✓"
+          : "[UXTapFix] Input Monitoring not granted (optional)")
+    RunLoop.main.run(until: Date().addingTimeInterval(1.0))
+    exit(inputMonitoringGranted() ? 0 : 2)
 }
 
 // Older builds could be added with "Open at Login" (a Background Task
@@ -525,26 +508,18 @@ func axAttribute(_ element: AXUIElement, _ attribute: String) -> AnyObject? {
     return value
 }
 
-func axURL(_ element: AXUIElement) -> URL? {
-    let rawURL = axAttribute(element, "AXURL")
-    return (rawURL as? URL) ?? (rawURL as? String).flatMap(URL.init(string:))
-}
-
 func dockItem(at point: CGPoint) -> DockItem? {
     let sys = AXUIElementCreateSystemWide()
-    // This runs inside the event-tap callback. Bound the synchronous AX IPC so
-    // a busy Dock cannot trip the tap watchdog and cost us the click.
-    AXUIElementSetMessagingTimeout(sys, 0.1)
     var el: AXUIElement?
     let err = AXUIElementCopyElementAtPosition(sys, Float(point.x), Float(point.y), &el)
     guard err == .success, let element = el else { return nil }
-    AXUIElementSetMessagingTimeout(element, 0.1)
     guard axAttribute(element, kAXRoleAttribute) as? String == "AXDockItem" else { return nil }
 
     // AXURL identifies the bundle the tile points at. It is more reliable than
     // the title: Ableton, for example, shows "Ableton Live 12 Suite" in the Dock
     // while NSRunningApplication.localizedName is just "Live".
-    let url = axURL(element)
+    let rawURL = axAttribute(element, "AXURL")
+    let url = (rawURL as? URL) ?? (rawURL as? String).flatMap(URL.init(string:))
 
     var name = axAttribute(element, kAXTitleAttribute) as? String
     if name?.isEmpty != false { name = axAttribute(element, kAXDescriptionAttribute) as? String }
@@ -559,9 +534,7 @@ func normalizedBundlePath(_ url: URL) -> String {
     return path
 }
 
-func runningApp(for item: DockItem) -> NSRunningApplication? {
-    let name = item.name
-    let url = item.url
+func runningApp(named name: String, url: URL?) -> NSRunningApplication? {
     let apps = NSWorkspace.shared.runningApplications
 
     // Prefer the Dock tile's bundle over any name comparison. Bundle ID first
@@ -601,42 +574,11 @@ func runningApp(for item: DockItem) -> NSRunningApplication? {
     }
 }
 
-func isBlacklisted(_ item: DockItem) -> Bool {
-    let finderAllowed = UserDefaults.standard.bool(forKey: "middleClickAllowFinderQuit")
-
-    // Prefer the bundle/path. Localized Dock titles ("Papierkorb", "Schreibtisch")
-    // made the old title-only check unreliable outside English.
-    if let url = item.url {
-        let path = normalizedBundlePath(url)
-        if path == "/System/Library/CoreServices/Finder.app" {
-            return !finderAllowed
-        }
-        if path.hasSuffix("/.Trash") || path.hasSuffix("/Launchpad.app") || path.hasSuffix("/Mission Control.app") {
-            return true
-        }
-        if let bundleID = Bundle(url: url)?.bundleIdentifier {
-            switch bundleID {
-            case "com.apple.finder":
-                return !finderAllowed
-            case "com.apple.launchpad.launcher", "com.apple.exposelauncher":
-                return true
-            default:
-                break
-            }
-        }
-    }
-
-    let lower = item.name.lowercased()
-    if lower == "finder" {
-        return !finderAllowed
-    }
-    let trashPath = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".Trash", isDirectory: true)
-        .path
-    let localizedTrashName = FileManager.default.displayName(atPath: trashPath).lowercased()
+func isBlacklisted(_ name: String) -> Bool {
+    let lower = name.lowercased()
     // Finder relaunches; Trash/Launchpad/Mission Control are not normal apps.
     // Run scripts/enable-finder-quit.sh if you want middle-click to quit Finder.
-    return ["trash", "launchpad", "mission control"].contains(lower) || lower == localizedTrashName
+    return ["trash", "launchpad", "mission control", "finder"].contains(lower)
 }
 
 enum QuitMode {
@@ -718,49 +660,45 @@ func dockApplicationElement() -> AXUIElement? {
     guard let dock = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first else {
         return nil
     }
-    let element = AXUIElementCreateApplication(dock.processIdentifier)
-    // Menu automation runs on the main queue, not in the event-tap callback,
-    // so give the Dock enough time to open and populate its menu.
-    AXUIElementSetMessagingTimeout(element, 1.0)
-    return element
+    return AXUIElementCreateApplication(dock.processIdentifier)
 }
 
-func findDockItem(in element: AXUIElement, matching target: DockItem, matchURL: Bool) -> AXUIElement? {
+func findDockItem(in element: AXUIElement, name: String, url: URL?, matchURL: Bool) -> AXUIElement? {
     if axAttribute(element, kAXRoleAttribute) as? String == "AXDockItem" {
-        if matchURL, let url = target.url {
-            if let itemURL = axURL(element), normalizedBundlePath(itemURL) == normalizedBundlePath(url) {
+        if matchURL, let url {
+            let rawURL = axAttribute(element, "AXURL")
+            let itemURL = (rawURL as? URL) ?? (rawURL as? String).flatMap(URL.init(string:))
+            if let itemURL, normalizedBundlePath(itemURL) == normalizedBundlePath(url) {
                 return element
             }
-        } else if axAttribute(element, kAXTitleAttribute) as? String == target.name {
+        } else if axAttribute(element, kAXTitleAttribute) as? String == name {
             return element
         }
     }
     guard let children = axAttribute(element, kAXChildrenAttribute) as? [AXUIElement] else { return nil }
     for child in children {
-        if let match = findDockItem(in: child, matching: target, matchURL: matchURL) {
+        if let match = findDockItem(in: child, name: name, url: url, matchURL: matchURL) {
             return match
         }
     }
     return nil
 }
 
-func dockItemElement(for target: DockItem) -> AXUIElement? {
+func dockItemElement(named name: String, url: URL?) -> AXUIElement? {
     guard let dock = dockApplicationElement() else { return nil }
     // The bundle path is stable even when the Dock title differs from the app
     // name; fall back to the visible title when the URL is unavailable.
-    if target.url != nil, let match = findDockItem(in: dock, matching: target, matchURL: true) {
+    if url != nil, let match = findDockItem(in: dock, name: name, url: url, matchURL: true) {
         return match
     }
-    return findDockItem(in: dock, matching: target, matchURL: false)
+    return findDockItem(in: dock, name: name, url: url, matchURL: false)
 }
 
 /// The Dock reports 1 while any part of the app is still alive, including a
 /// helper that keeps the tile labelled "Running in Background". A pinned app
 /// that is fully quit reports 0.
 func dockItemIsRunning(_ item: AXUIElement) -> Bool {
-    // If the attribute is unavailable, do not risk opening a normal app's
-    // menu; treating it as "not running" keeps the ordinary tile untouched.
-    guard let number = axAttribute(item, "AXIsApplicationRunning") as? NSNumber else { return false }
+    guard let number = axAttribute(item, "AXIsApplicationRunning") as? NSNumber else { return true }
     return number.boolValue
 }
 
@@ -783,25 +721,21 @@ func findMenuItem(in element: AXUIElement, titled title: String) -> AXUIElement?
 }
 
 var backgroundStopInProgress = false
-var backgroundStopCurrent: DockItem?
-var backgroundStopQueue: [DockItem] = []
+var backgroundStopCurrent: (name: String, url: URL?)?
+var backgroundStopQueue: [(name: String, url: URL?)] = []
 
-func isSameDockItem(_ lhs: DockItem, _ rhs: DockItem) -> Bool {
-    lhs.name == rhs.name && sameDockTarget(lhs.url, rhs.url)
-}
-
-func stopRunningInBackground(_ target: DockItem, attempts: Int = 3) {
-    let sameAsCurrent = backgroundStopCurrent.map { isSameDockItem($0, target) } ?? false
-    let alreadyQueued = backgroundStopQueue.contains { isSameDockItem($0, target) }
+func stopRunningInBackground(named name: String, url: URL?, attempts: Int = 3) {
+    let sameAsCurrent = backgroundStopCurrent.map { current in
+        current.name == name && sameDockTarget(current.url, url)
+    } ?? false
+    let alreadyQueued = backgroundStopQueue.contains { queued in
+        queued.name == name && sameDockTarget(queued.url, url)
+    }
     // A second app quit while the Dock menu is open used to be ignored, so
     // its "Running in Background" tile stayed. Queue it and run it next.
     guard !sameAsCurrent, !alreadyQueued else { return }
-    backgroundStopQueue.append(target)
+    backgroundStopQueue.append((name: name, url: url))
     drainBackgroundStopQueue(attempts: attempts)
-}
-
-func retryDockStop(_ work: @escaping () -> Void) {
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
 }
 
 func sameDockTarget(_ lhs: URL?, _ rhs: URL?) -> Bool {
@@ -820,86 +754,79 @@ func drainBackgroundStopQueue(attempts: Int) {
     let next = backgroundStopQueue.removeFirst()
     backgroundStopInProgress = true
     backgroundStopCurrent = next
-    attemptStopRunningInBackground(next, attempt: 0, attempts: attempts) {
+    attemptStopRunningInBackground(named: next.name, url: next.url, attempt: 0, attempts: attempts) {
         backgroundStopInProgress = false
         backgroundStopCurrent = nil
         drainBackgroundStopQueue(attempts: attempts)
     }
 }
 
-func attemptStopRunningInBackground(_ target: DockItem, attempt: Int, attempts: Int, completion: @escaping () -> Void) {
+func attemptStopRunningInBackground(named name: String, url: URL?, attempt: Int, attempts: Int, completion: @escaping () -> Void) {
     // The Dock needs a moment to register the background activity after the
     // processes exit, so retry a few times before giving up.
     guard attempt < attempts else {
-        print("[UXTapFix] Dock has no background activity to stop for '\(target.name)'.")
+        print("[UXTapFix] Dock has no background activity to stop for '\(name)'.")
         completion()
         return
     }
 
-    guard let element = dockItemElement(for: target) else {
-        retryDockStop {
-            attemptStopRunningInBackground(target, attempt: attempt + 1, attempts: attempts, completion: completion)
+    guard let item = dockItemElement(named: name, url: url) else {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            attemptStopRunningInBackground(named: name, url: url, attempt: attempt + 1, attempts: attempts, completion: completion)
         }
         return
     }
 
     // Do not flash a normal app's context menu: it has no background command.
-    guard dockItemIsRunning(element) else {
+    guard dockItemIsRunning(item) else {
         completion()
         return
     }
 
     func retry() {
-        retryDockStop {
-            attemptStopRunningInBackground(target, attempt: attempt + 1, attempts: attempts, completion: completion)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            attemptStopRunningInBackground(named: name, url: url, attempt: attempt + 1, attempts: attempts, completion: completion)
         }
     }
 
-    guard AXUIElementPerformAction(element, kAXShowMenuAction as CFString) == .success else {
+    guard AXUIElementPerformAction(item, kAXShowMenuAction as CFString) == .success else {
         retry()
         return
     }
 
-    waitForDockMenu(of: element, target: target, attempt: attempt, attempts: attempts, pollsLeft: 20, completion: completion)
+    waitForDockMenu(of: item, named: name, url: url, attempt: attempt, attempts: attempts, pollsLeft: 20, completion: completion)
 }
 
-func waitForDockMenu(of item: AXUIElement, target: DockItem, attempt: Int, attempts: Int, pollsLeft: Int, completion: @escaping () -> Void) {
+func waitForDockMenu(of item: AXUIElement, named name: String, url: URL?, attempt: Int, attempts: Int, pollsLeft: Int, completion: @escaping () -> Void) {
     guard pollsLeft > 0 else {
-        retryDockStop {
-            attemptStopRunningInBackground(target, attempt: attempt + 1, attempts: attempts, completion: completion)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            attemptStopRunningInBackground(named: name, url: url, attempt: attempt + 1, attempts: attempts, completion: completion)
         }
         return
     }
 
     if let shownAttribute = axAttribute(item, "AXShownMenuUIElement") {
-        guard CFGetTypeID(shownAttribute) == AXUIElementGetTypeID() else {
-            retryDockStop {
-                attemptStopRunningInBackground(target, attempt: attempt + 1, attempts: attempts, completion: completion)
-            }
-            return
-        }
         let shown = shownAttribute as! AXUIElement
-        AXUIElementSetMessagingTimeout(shown, 1.0)
         let title = localizedDockMenuTitle("STOP_RUNNING_IN_BACKGROUND", fallback: "Stop Running in Background")
         if let menuItem = findMenuItem(in: shown, titled: title) {
             let result = AXUIElementPerformAction(menuItem, kAXPressAction as CFString)
             if result == .success {
-                print("[UXTapFix] Stopped '\(target.name)' running in the background.")
+                print("[UXTapFix] Stopped '\(name)' running in the background.")
             } else {
-                print("[UXTapFix] Could not stop '\(target.name)' in the background (AX error \(result.rawValue)).")
+                print("[UXTapFix] Could not stop '\(name)' in the background (AX error \(result.rawValue)).")
             }
             completion()
         } else {
             _ = AXUIElementPerformAction(shown, kAXCancelAction as CFString)
-            retryDockStop {
-                attemptStopRunningInBackground(target, attempt: attempt + 1, attempts: attempts, completion: completion)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                attemptStopRunningInBackground(named: name, url: url, attempt: attempt + 1, attempts: attempts, completion: completion)
             }
         }
         return
     }
 
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) {
-        waitForDockMenu(of: item, target: target, attempt: attempt, attempts: attempts, pollsLeft: pollsLeft - 1, completion: completion)
+        waitForDockMenu(of: item, named: name, url: url, attempt: attempt, attempts: attempts, pollsLeft: pollsLeft - 1, completion: completion)
     }
 }
 
@@ -907,14 +834,14 @@ func waitForDockMenu(of item: AXUIElement, target: DockItem, attempt: Int, attem
 /// Dock tile is what the user sees, so it must go even when every process is
 /// already gone. A pinned app that is fully closed reports `isRunning == 0`,
 /// so its ordinary tile is left alone.
-func clearBackgroundActivity(after apps: [NSRunningApplication], target: DockItem) {
+func clearBackgroundActivity(after apps: [NSRunningApplication], named name: String, url: URL?) {
     let deadline = Date().addingTimeInterval(2.5)
     func poll() {
-        let stillRunning = runningApp(for: target)
+        let stillRunning = runningApp(named: name, url: url)
         if stillRunning == nil && apps.allSatisfy(hasExited) {
-            stopRunningInBackground(target)
+            stopRunningInBackground(named: name, url: url)
         } else if Date() >= deadline {
-            print("[UXTapFix] '\(target.name)' is still running; not touching its Dock tile.")
+            print("[UXTapFix] '\(name)' is still running; not touching its Dock tile.")
         } else {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: poll)
         }
@@ -932,7 +859,8 @@ func finishQuit(
     app: NSRunningApplication,
     helpers: [NSRunningApplication],
     descendants: [pid_t],
-    target: DockItem,
+    named name: String,
+    url: URL?,
     force: Bool
 ) {
     let pid = app.processIdentifier
@@ -944,13 +872,12 @@ func finishQuit(
             helper.forceTerminate()
         }
         forceTerminate(processIDs: descendants)
-        clearBackgroundActivity(after: [app] + helpers, target: target)
+        clearBackgroundActivity(after: [app] + helpers, named: name, url: url)
         return
     }
 
     normalQuitWaits[pid, default: 0] += 1
     let generation = normalQuitWaits[pid] ?? 0
-    let deadline = Date().addingTimeInterval(300)
 
     func waitForExit() {
         // A newer normal quit, or a force quit, owns this app now.
@@ -958,12 +885,7 @@ func finishQuit(
         let allTerminated = hasExited(app) && helpers.allSatisfy(hasExited)
         if allTerminated {
             normalQuitWaits[pid] = nil
-            clearBackgroundActivity(after: [app] + helpers, target: target)
-        } else if Date() >= deadline {
-            // The user cancelled the quit, or a helper is stuck. Do not force
-            // anything; just stop retaining the app and leave its tile alone.
-            normalQuitWaits[pid] = nil
-            print("[UXTapFix] '\(target.name)' is still running; leaving its Dock tile alone.")
+            clearBackgroundActivity(after: [app] + helpers, named: name, url: url)
         } else {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: waitForExit)
         }
@@ -971,13 +893,13 @@ func finishQuit(
     waitForExit()
 }
 
-func quitApp(_ target: DockItem, mode: QuitMode = .normal) {
-    if isBlacklisted(target) {
-        print("[UXTapFix] Ignoring blacklisted '\(target.name)'")
+func quitApp(named name: String, url: URL? = nil, mode: QuitMode = .normal) {
+    if isBlacklisted(name) {
+        print("[UXTapFix] Ignoring blacklisted '\(name)'")
         return
     }
-    if let app = runningApp(for: target) {
-        lastQuitName = target.name
+    if let app = runningApp(named: name, url: url) {
+        lastQuitName = name
         lastQuitAt = Date().timeIntervalSince1970
         writeStatus()
 
@@ -986,23 +908,23 @@ func quitApp(_ target: DockItem, mode: QuitMode = .normal) {
 
         switch mode {
         case .normal:
-            print("[UXTapFix] Quitting '\(target.name)' pid \(app.processIdentifier) and \(helpers.count) background process(es)")
+            print("[UXTapFix] Quitting '\(name)' pid \(app.processIdentifier) and \(helpers.count) background process(es)")
             _ = app.terminate()
             for helper in helpers { _ = helper.terminate() }
-            finishQuit(app: app, helpers: helpers, descendants: descendants, target: target, force: false)
+            finishQuit(app: app, helpers: helpers, descendants: descendants, named: name, url: url, force: false)
         case .force:
-            print("[UXTapFix] Force quitting '\(target.name)' pid \(app.processIdentifier) and \(helpers.count) background process(es)")
+            print("[UXTapFix] Force quitting '\(name)' pid \(app.processIdentifier) and \(helpers.count) background process(es)")
             app.forceTerminate()
             for helper in helpers { helper.forceTerminate() }
-            finishQuit(app: app, helpers: helpers, descendants: descendants, target: target, force: true)
+            finishQuit(app: app, helpers: helpers, descendants: descendants, named: name, url: url, force: true)
         }
         return
     }
 
-    print("[UXTapFix] No running app for '\(target.name)'")
+    print("[UXTapFix] No running app for '\(name)'")
     // The app may already be gone while macOS still shows its tile as "Running
     // in Background". A click on that tile should clear exactly that state.
-    clearBackgroundActivity(after: [], target: target)
+    clearBackgroundActivity(after: [], named: name, url: url)
 }
 
 // MARK: - Event handling (shared)
@@ -1025,25 +947,27 @@ let multiClickWindow: TimeInterval = {
 }()
 
 var pendingDockClickCount = 0
-var pendingDockClick: DockItem?
+var pendingDockClickName: String?
+var pendingDockClickURL: URL?
 var pendingDockClickWorkItem: DispatchWorkItem?
 
-func registerDockMiddleClick(_ target: DockItem) {
+func registerDockMiddleClick(appName: String, url: URL?) {
     guard multiClickEnabled else {
-        quitApp(target)
+        quitApp(named: appName, url: url)
         return
     }
-    if pendingDockClick?.name != target.name {
+    if pendingDockClickName != appName {
         // The window only exists so more clicks on this same icon can arrive.
         // A click on a different icon used to cancel the previous quit and
         // never run it.
         commitPendingDockClick()
+        pendingDockClickName = appName
         pendingDockClickCount = 0
     }
-    pendingDockClick = target
+    pendingDockClickURL = url
     pendingDockClickCount = min(pendingDockClickCount + 1, 3)
     let count = pendingDockClickCount
-    print("[UXTapFix] Dock middle-click \(count) on '\(target.name)'")
+    print("[UXTapFix] Dock middle-click \(count) on '\(appName)'")
 
     pendingDockClickWorkItem?.cancel()
     pendingDockClickWorkItem = nil
@@ -1052,9 +976,10 @@ func registerDockMiddleClick(_ target: DockItem) {
     // click. Waiting for the window to elapse would let continued clicking
     // postpone the force quit indefinitely.
     if count >= 3 {
-        pendingDockClick = nil
+        pendingDockClickName = nil
+        pendingDockClickURL = nil
         pendingDockClickCount = 0
-        quitApp(target, mode: .force)
+        quitApp(named: appName, url: url, mode: .force)
         return
     }
 
@@ -1070,10 +995,12 @@ func registerDockMiddleClick(_ target: DockItem) {
 func commitPendingDockClick() {
     pendingDockClickWorkItem?.cancel()
     pendingDockClickWorkItem = nil
-    guard let target = pendingDockClick else { return }
-    pendingDockClick = nil
+    guard let name = pendingDockClickName else { return }
+    let url = pendingDockClickURL
+    pendingDockClickName = nil
+    pendingDockClickURL = nil
     pendingDockClickCount = 0
-    quitApp(target, mode: .normal)
+    quitApp(named: name, url: url, mode: .normal)
 }
 
 // MARK: - CGEventTap (can swallow)
@@ -1087,8 +1014,6 @@ var swallowedDockMiddleDown = false
 
 func tapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent, refcon: UnsafeMutableRawPointer?) -> Unmanaged<CGEvent>? {
     if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-        // An up that never arrived must not be swallowed on the next click.
-        swallowedDockMiddleDown = false
         if let t = eventTap { CGEvent.tapEnable(tap: t, enable: true) }
         return Unmanaged.passUnretained(event)
     }
@@ -1111,14 +1036,12 @@ func tapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent, refc
     }
 
     if event.type == .otherMouseDown {
-        // A down before the previous up means the up was missed.
-        swallowedDockMiddleDown = false
         let btn = event.getIntegerValueField(.mouseEventButtonNumber)
         if btn == middleButton {
             let loc = event.location
             if let item = dockItem(at: loc) {
                 swallowedDockMiddleDown = true
-                DispatchQueue.main.async { registerDockMiddleClick(item) }
+                DispatchQueue.main.async { registerDockMiddleClick(appName: item.name, url: item.url) }
                 return nil // swallow
             }
             swallowedDockMiddleDown = false
@@ -1151,12 +1074,11 @@ func tryInstallEventTap(logFailure: Bool = true) -> Bool {
         userInfo: nil
     ) else {
         if logFailure {
-            print("[UXTapFix] CGEventTap unavailable (check Accessibility). Falling back to NSEvent global monitor.")
+            print("[UXTapFix] CGEventTap failed (Accessibility not granted). Falling back to NSEvent global monitor.")
         }
         return false
     }
     eventTap = tap
-    swallowedDockMiddleDown = false
     let src = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
     CFRunLoopAddSource(CFRunLoopGetCurrent(), src, .commonModes)
     CGEvent.tapEnable(tap: tap, enable: true)
@@ -1168,22 +1090,10 @@ func tryInstallEventTap(logFailure: Bool = true) -> Bool {
 /// caches the old answer in this process, so retry the tap instead of making
 /// the user restart the background service.
 func retryEventTapIfNeeded() {
-    guard accessibilityGranted() else { return }
-    if let tap = eventTap {
-        if CGEvent.tapIsEnabled(tap: tap) { return }
-        // The callback re-enables most disabled taps. If that did not stick,
-        // discard the dead tap and build a fresh one below.
-        CGEvent.tapEnable(tap: tap, enable: true)
-        if CGEvent.tapIsEnabled(tap: tap) { return }
-        CFMachPortInvalidate(tap)
-        eventTap = nil
-    }
+    guard eventTap == nil, accessibilityGranted() else { return }
     if tryInstallEventTap(logFailure: false) {
         removeGlobalMonitor()
         print("[UXTapFix] Accessibility became available; event tap is active without a restart.")
-    } else {
-        // Keep a passive path alive if the tap cannot be rebuilt.
-        installGlobalMonitor()
     }
 }
 
@@ -1197,7 +1107,7 @@ func installGlobalMonitor() {
         // (bottom-left), so the AX hit test looks at the actual Dock item.
         let pt = e.cgEvent?.location ?? CGEvent(source: nil)?.location
         guard let pt, let item = dockItem(at: pt) else { return }
-        DispatchQueue.main.async { registerDockMiddleClick(item) }
+        DispatchQueue.main.async { registerDockMiddleClick(appName: item.name, url: item.url) }
     }
     print("[UXTapFix] NSEvent global monitor installed ✓ (passive)")
 }
@@ -1219,7 +1129,7 @@ if !tapOK {
     // Only one handler may register a click: running the passive monitor next
     // to a working event tap can count the same physical click twice.
     installGlobalMonitor()
-    print("[UXTapFix] Using fallback monitor. Dock clicks still require Accessibility; the Dock menu may flash briefly.")
+    print("[UXTapFix] Using fallback monitor. Middle-click still works, but the Dock menu may flash briefly.")
 } else {
     print("[UXTapFix] Input Monitoring \(inputMonitoringGranted() ? "granted ✓" : "not granted")")
 }
@@ -1241,19 +1151,13 @@ startStatusHeartbeat()
 print("[UXTapFix] Ready. Three-finger tap/click a Dock icon to quit; middle-click a browser tab to close it. PID \(getpid())")
 print("[UXTapFix] Log: \(logFileURL.path)")
 
-signal(SIGTERM, SIG_IGN)
-signal(SIGINT, SIG_IGN)
-let sigtermSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
-sigtermSource.setEventHandler {
+signal(SIGTERM) { _ in
     print("[UXTapFix] SIGTERM")
     exit(0)
 }
-let sigintSource = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
-sigintSource.setEventHandler {
+signal(SIGINT) { _ in
     print("[UXTapFix] SIGINT")
     exit(0)
 }
-sigtermSource.resume()
-sigintSource.resume()
 
 CFRunLoopRun()

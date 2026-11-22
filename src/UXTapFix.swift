@@ -807,9 +807,10 @@ func clearBackgroundActivity(after apps: [NSRunningApplication], named name: Str
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: poll)
 }
 
-/// Gives a normal quit 1.2 s to finish, then force-quits whatever is left.
-/// Plain child processes are killed too; otherwise they keep the Dock tile
-/// labelled "Running in Background" long after the app itself is gone.
+/// Normal quits are never escalated. The app gets as long as it needs to show
+/// a save sheet or finish its own shutdown. Once every process has exited we
+/// clear a lingering "Running in Background" Dock tile. Force quit is only used
+/// when the user explicitly asks for it with a triple-click.
 func finishQuit(
     app: NSRunningApplication,
     helpers: [NSRunningApplication],
@@ -818,27 +819,25 @@ func finishQuit(
     url: URL?,
     force: Bool
 ) {
-    let deadline = force ? Date() : Date().addingTimeInterval(1.2)
+    if force {
+        if !app.isTerminated { app.forceTerminate() }
+        for helper in helpers where !helper.isTerminated {
+            helper.forceTerminate()
+        }
+        forceTerminate(processIDs: descendants)
+        clearBackgroundActivity(after: [app] + helpers, named: name, url: url)
+        return
+    }
 
-    func settle() {
+    func waitForExit() {
         let allTerminated = app.isTerminated && helpers.allSatisfy { $0.isTerminated }
-        if allTerminated || Date() >= deadline {
-            if !app.isTerminated {
-                if !force {
-                    print("[UXTapFix] '\(name)' ignored the quit; forcing it now.")
-                }
-                app.forceTerminate()
-            }
-            for helper in helpers where !helper.isTerminated {
-                helper.forceTerminate()
-            }
-            forceTerminate(processIDs: descendants)
+        if allTerminated {
             clearBackgroundActivity(after: [app] + helpers, named: name, url: url)
         } else {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: settle)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: waitForExit)
         }
     }
-    settle()
+    waitForExit()
 }
 
 func quitApp(named name: String, url: URL? = nil, mode: QuitMode = .normal) {

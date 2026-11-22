@@ -139,7 +139,7 @@ Repeating the middle-click on the same Dock icon:
 
 | Middle-clicks on one Dock icon | What happens |
 | --- | --- |
-| 1× | The app and any helpers it leaves behind quit; its Dock tile is cleared. |
+| 1× | The app and any helpers it leaves behind quit; its Dock tile is cleared. The app is never force-quit — it gets as long as it needs for a save sheet or a slow shutdown. |
 | 2× | Same as a single click; there is no separate 2× action. |
 | 3× | The app and its helpers are force-quit immediately. |
 
@@ -269,8 +269,8 @@ from the DMG without the repository.
 3. On each middle click, the Accessibility API resolves the element under the
    pointer (`AXUIElementCopyElementAtPosition`) and checks for `AXDockItem`.
 4. The icon title is matched to a running app and quit with
-   `NSRunningApplication.terminate()`. If needed it escalates to
-   `forceTerminate()` after 1.2 seconds, then AppleScript.
+   `NSRunningApplication.terminate()`. A normal quit waits for the app to exit
+   on its own; only a triple-click calls `forceTerminate()`.
 5. `Trash`, `Launchpad`, `Mission Control`, and `Finder` are ignored. Finder
    relaunches immediately; `scripts/enable-finder-quit.sh` rebuilds with it
    allowed if you really want that.

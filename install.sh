@@ -125,7 +125,7 @@ if [[ "$mode" == "guided" ]]; then
     open "$SETUP_APP"
     echo ""
     echo "UXTapFix Setup is opening. Follow the short steps:"
-    echo "  Welcome -> Permissions & Login -> Finish"
+    echo "  Welcome -> Install -> Setup -> Finish"
     exit 0
 fi
 

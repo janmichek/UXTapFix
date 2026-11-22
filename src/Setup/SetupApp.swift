@@ -101,6 +101,7 @@ enum SnapshotSupport {
         guard let name = value(after: "--preview-step")?.lowercased() else { return nil }
         switch name {
         case "welcome": return .welcome
+        case "install": return .install
         case "permissions", "access", "login": return .permissions
         case "finish", "try": return .finish
         default: return nil
@@ -156,14 +157,6 @@ struct SetupRootView: View {
                 guard SnapshotSupport.outputPath == nil else { return }
                 model.refresh()
             }
-            .safeAreaInset(edge: .top, spacing: 0) {
-                if let message = model.infoMessage, !message.isEmpty {
-                    Notice(text: message)
-                        .padding(.horizontal, SetupStyle.contentPadding)
-                        .padding(.top, 8)
-                        .padding(.bottom, 4)
-                }
-            }
             .alert("Something went wrong", isPresented: errorBinding) {
                 Button("OK") { model.errorMessage = nil }
             } message: {
@@ -176,6 +169,8 @@ struct SetupRootView: View {
         switch model.step {
         case .welcome:
             WelcomeView(model: model)
+        case .install:
+            InstallView(model: model)
         case .permissions:
             PermissionsView(model: model)
         case .finish:
@@ -193,13 +188,8 @@ struct SetupRootView: View {
 
 // MARK: - Welcome
 
-private final class WelcomeAdvanceState: ObservableObject {
-    @Published var inProgress = false
-}
-
 struct WelcomeView: View {
     @ObservedObject var model: SetupModel
-    @StateObject private var advance = WelcomeAdvanceState()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -209,13 +199,9 @@ struct WelcomeView: View {
 
                     WelcomeHero()
 
-                    if model.busy {
-                        InstallProgressCard(phase: model.installPhase)
-                    } else {
-                        HStack(alignment: .top, spacing: SetupStyle.itemSpacing) {
-                            ForEach(FeaturePreviewKind.allCases) { kind in
-                                FeaturePreviewCard(kind: kind)
-                            }
+                    HStack(alignment: .top, spacing: SetupStyle.itemSpacing) {
+                        ForEach(FeaturePreviewKind.allCases) { kind in
+                            FeaturePreviewCard(kind: kind)
                         }
                     }
 
@@ -237,40 +223,100 @@ struct WelcomeView: View {
             .scrollIndicators(.hidden)
 
             SetupFooter {
+                Spacer()
+
                 Button {
-                    NSApp.terminate(nil)
+                    model.beginInstall()
                 } label: {
-                    ActionLabel(title: "Close", systemName: "xmark")
+                    ActionLabel(title: "Install", systemName: "arrow.down.to.line")
+                }
+                .buttonStyle(SetupButtonStyle(prominent: true))
+                .disabled(model.busy)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+    }
+}
+
+// MARK: - Install
+
+struct InstallView: View {
+    @ObservedObject var model: SetupModel
+
+    /// A revisited Install step shows a completed checklist even when this
+    /// launch skipped the progress because UXTapFix was already installed.
+    private var displayedPhase: SetupModel.InstallPhase {
+        model.installed && !model.busy ? .finished : model.installPhase
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: SetupStyle.sectionSpacing) {
+                    StepHeader(
+                        step: .install,
+                        title: "Install",
+                        subtitle: "UXTapFix is copied to your user Applications folder and started automatically when you log in. No admin password is required."
+                    )
+
+                    InstallProgressCard(phase: displayedPhase)
+
+                    if model.installFailed && !model.busy {
+                        Notice(
+                            text: "UXTapFix wasn't installed. Try again to retry the installation.",
+                            kind: .warning
+                        )
+                    }
+
+                    if model.hadLegacyInstall {
+                        Notice(
+                            text: "An older copy in /Applications will be moved to the Trash.",
+                            kind: .warning
+                        )
+                    }
+                }
+                .padding(SetupStyle.contentPadding)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .scrollIndicators(.hidden)
+
+            SetupFooter {
+                Button {
+                    model.goBack()
+                } label: {
+                    ActionLabel(title: "Back", systemName: "chevron.left")
                 }
                 .buttonStyle(SetupButtonStyle())
-                .disabled(model.busy || advance.inProgress)
+                .disabled(model.busy)
 
                 Spacer()
 
-                if !model.busy {
+                if model.busy {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Installing…")
+                            .font(SetupFont.body)
+                            .foregroundStyle(.secondary)
+                    }
+                } else if model.installed {
                     Button {
-                        guard !advance.inProgress else { return }
-                        advance.inProgress = true
-                        Task {
-                            if model.installed {
-                                await model.retireLegacySystemCopy()
-                                if model.errorMessage == nil {
-                                    model.goNext()
-                                }
-                            } else {
-                                await model.install()
-                            }
-                            advance.inProgress = false
-                        }
+                        model.goNext()
+                    } label: {
+                        ActionLabel(title: "Next", systemName: "arrow.right", iconAfter: true)
+                    }
+                    .buttonStyle(SetupButtonStyle(prominent: true))
+                    .keyboardShortcut(.defaultAction)
+                } else {
+                    Button {
+                        model.beginInstall()
                     } label: {
                         ActionLabel(
-                            title: model.installed ? "Next" : "Install",
-                            systemName: model.installed ? "arrow.right" : "arrow.down.to.line",
-                            iconAfter: model.installed
+                            title: model.installFailed ? "Try Again" : "Install",
+                            systemName: "arrow.down.to.line"
                         )
                     }
                     .buttonStyle(SetupButtonStyle(prominent: true))
-                    .disabled(advance.inProgress)
                     .keyboardShortcut(.defaultAction)
                 }
             }
@@ -317,6 +363,7 @@ private struct InstallProgressCard: View {
     }
 
     private func state(for index: Int) -> InstallProgressRow.State {
+        if phase == .finished { return .done }
         if index < activeIndex { return .done }
         if index == activeIndex { return .current }
         return .pending
@@ -383,7 +430,7 @@ struct PermissionsView: View {
                 VStack(alignment: .leading, spacing: SetupStyle.sectionSpacing) {
                     StepHeader(
                         step: .permissions,
-                        title: "Permissions & Login",
+                        title: "Setup",
                         subtitle: "macOS asks for Accessibility before UXTapFix can see Dock clicks."
                     )
 
@@ -393,6 +440,15 @@ struct PermissionsView: View {
                             kind: .warning,
                             actionTitle: "Restart",
                             action: { model.restartService() }
+                        )
+                    }
+
+                    if model.middleClickAppRunning {
+                        Notice(
+                            text: "MiddleClick is still running. Quit it so one three-finger tap does not fire twice.",
+                            kind: .warning,
+                            actionTitle: "Quit MiddleClick",
+                            action: { model.quitMiddleClick() }
                         )
                     }
 
@@ -447,13 +503,6 @@ struct PermissionsView: View {
                     model.goBack()
                 } label: {
                     ActionLabel(title: "Back", systemName: "chevron.left")
-                }
-                .buttonStyle(SetupButtonStyle())
-
-                Button {
-                    NSApp.terminate(nil)
-                } label: {
-                    ActionLabel(title: "Close", systemName: "xmark")
                 }
                 .buttonStyle(SetupButtonStyle())
 
@@ -577,20 +626,11 @@ struct FinishView: View {
                             VStack(alignment: .leading, spacing: 10) {
                                 TipRow(symbol: "macwindow", text: "Tap a browser tab with three fingers to close it.")
                                 TipRow(symbol: "link", text: "Tap a link with three fingers to open it in a new tab.")
-                                TipRow(symbol: "square.grid.2x2", text: "Middle-click or 3-finger tap a Dock icon to quit the app.")
+                                TipRow(symbol: "square.grid.2x2", text: "Tap a Dock icon with three fingers to quit the app.")
                                 TipRow(symbol: "bolt.fill", text: "Triple-click/tap to force quit immediately.")
-                                TipRow(symbol: "terminal", text: "Middle-click in Terminal to paste the selection.")
+                                TipRow(symbol: "terminal", text: "Tap in Terminal with three fingers to paste the selection.")
                             }
                         }
-                    }
-
-                    if model.middleClickAppRunning {
-                        Notice(
-                            text: "MiddleClick is still running. Quit it so one three-finger gesture does not send two middle clicks.",
-                            kind: .warning,
-                            actionTitle: "Quit MiddleClick",
-                            action: { model.quitMiddleClick() }
-                        )
                     }
 
                     if model.legacyLoginItemPresent {
@@ -612,13 +652,6 @@ struct FinishView: View {
                     model.goBack()
                 } label: {
                     ActionLabel(title: "Back", systemName: "chevron.left")
-                }
-                .buttonStyle(SetupButtonStyle())
-
-                Button {
-                    NSApp.terminate(nil)
-                } label: {
-                    ActionLabel(title: "Close", systemName: "xmark")
                 }
                 .buttonStyle(SetupButtonStyle())
 

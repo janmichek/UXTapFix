@@ -24,7 +24,7 @@ enum FeaturePreviewKind: String, CaseIterable, Identifiable {
         case .threeFingerTap:
             return "Close tabs and open links in a new tab with a 3-finger tap."
         case .quitDockApp:
-            return "Middle-click or 3-finger tap a Dock icon to quit the app."
+            return "Tap a Dock icon with three fingers to quit the app."
         case .multiAction:
             return "Click/tap once to quit, or three times to force quit."
         }
@@ -32,7 +32,7 @@ enum FeaturePreviewKind: String, CaseIterable, Identifiable {
 
     var hint: String {
         switch self {
-        case .threeFingerTap: return "Middle click"
+        case .threeFingerTap: return "Tap"
         case .quitDockApp: return "Quit"
         case .multiAction: return "Force quit"
         }
@@ -87,7 +87,7 @@ struct FeatureAnimationClock {
 // MARK: - Welcome hero
 
 struct WelcomeHero: View {
-    private let subtitle = "Turn a three-finger tap into a middle click for tabs, links, and Dock apps."
+    private let subtitle = "Close tabs, open links, and quit Dock apps with a three-finger tap."
 
     var body: some View {
         HStack(spacing: 14) {
@@ -447,7 +447,7 @@ private struct TrackpadTapScene: View {
             MiddleMouseGlyph(size: item, active: fired)
                 .position(x: mouseX, y: centerY)
 
-            Text("Middle click")
+            Text("Tap")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(fired ? SetupColors.accent : Color.secondary)
                 .fixedSize()

@@ -29,7 +29,7 @@ cat > "$STAGE/Read Me.txt" <<'README'
 UXTapFix
 ==============
 
-Middle-click (or three-finger tap) a Dock icon to quit that app.
+Three-finger tap a Dock icon to quit that app.
 
 This release is ad-hoc signed, not notarized. `make-dmg.sh` prints the DMG
 SHA-256; verify it against the downloaded file before opening.

@@ -434,15 +434,6 @@ struct PermissionsView: View {
                         subtitle: "macOS asks for Accessibility before UXTapFix can see Dock clicks. Setup can't continue until it is granted."
                     )
 
-                    if model.launchAtLogin && !model.serviceRunning {
-                        Notice(
-                            text: "The background service isn't running.",
-                            kind: .warning,
-                            actionTitle: "Restart",
-                            action: { model.restartService() }
-                        )
-                    }
-
                     if model.middleClickAppRunning {
                         Notice(
                             text: "MiddleClick is still running. Quit it so one three-finger tap does not fire twice.",

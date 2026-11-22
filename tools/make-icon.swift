@@ -14,34 +14,11 @@ let outputDirectory = URL(fileURLWithPath: arguments[1], isDirectory: true)
 try? FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
 
 let canvas: CGFloat = 1024
-let tileRect = CGRect(x: 64, y: 64, width: 896, height: 896)
-let cornerRadius: CGFloat = 208
+let tileRect = CGRect(x: 96, y: 96, width: 832, height: 832)
+let cornerRadius: CGFloat = 186
 
 func color(_ red: CGFloat, _ green: CGFloat, _ blue: CGFloat, _ alpha: CGFloat = 1) -> NSColor {
     NSColor(srgbRed: red, green: green, blue: blue, alpha: alpha)
-}
-
-func drawSymbol(named name: String, in rect: CGRect, color tint: NSColor, pointSize: CGFloat, weight: NSFont.Weight = .semibold) {
-    let configuration = NSImage.SymbolConfiguration(pointSize: pointSize, weight: weight)
-    guard let symbol = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
-        .withSymbolConfiguration(configuration) else { return }
-
-    let tinted = NSImage(size: symbol.size)
-    tinted.lockFocus()
-    tint.set()
-    NSRect(origin: .zero, size: symbol.size).fill()
-    symbol.draw(in: NSRect(origin: .zero, size: symbol.size), from: .zero, operation: .destinationIn, fraction: 1)
-    tinted.unlockFocus()
-
-    let scale = min(rect.width / symbol.size.width, rect.height / symbol.size.height)
-    let drawSize = CGSize(width: symbol.size.width * scale, height: symbol.size.height * scale)
-    let drawRect = CGRect(
-        x: rect.midX - drawSize.width / 2,
-        y: rect.midY - drawSize.height / 2,
-        width: drawSize.width,
-        height: drawSize.height
-    )
-    tinted.draw(in: drawRect, from: .zero, operation: .sourceOver, fraction: 1)
 }
 
 let master = NSImage(size: NSSize(width: canvas, height: canvas))
@@ -90,34 +67,39 @@ context.drawRadialGradient(
     options: []
 )
 
-// A soft shadow beneath the main glyph.
-context.saveGState()
-context.setShadow(offset: CGSize(width: 0, height: -18), blur: 42, color: color(0.05, 0.08, 0.28, 0.30).cgColor)
-drawSymbol(
-    named: "cursorarrow.click.2",
-    in: CGRect(x: 210, y: 250, width: 600, height: 600),
-    color: color(1, 1, 1, 0.98),
-    pointSize: 470,
-    weight: .medium
-)
-context.restoreGState()
+// MARK: Main glyph — dot, short line, dot
+//
+// A minimal mark for the three-finger tap: two fingertips either side of a
+// short press. The mark fills most of the tile, with a wide, low center bar
+// so it stays legible from 16 px up.
 
-// Power badge: a white disc with a gradient power glyph.
-let badgeRect = CGRect(x: 652, y: 168, width: 238, height: 238)
+let glyphShadow = color(0.05, 0.08, 0.28, 0.30).cgColor
+let dotDiameter: CGFloat = 156
+let lineSize = CGSize(width: 100, height: 188)
+let lineGap: CGFloat = 84
+let glyphWidth = dotDiameter * 2 + lineSize.width + lineGap * 2
+let glyphCenterY: CGFloat = 512
+let dotY = glyphCenterY - dotDiameter / 2
+let lineY = glyphCenterY - lineSize.height / 2
+let leftDotX = (canvas - glyphWidth) / 2
+let lineX = leftDotX + dotDiameter + lineGap
+let rightDotX = lineX + lineSize.width + lineGap
+
 context.saveGState()
-context.setShadow(offset: CGSize(width: 0, height: -8), blur: 24, color: color(0.03, 0.06, 0.22, 0.26).cgColor)
+context.setShadow(offset: CGSize(width: 0, height: -12), blur: 34, color: glyphShadow)
 color(1, 1, 1, 0.97).setFill()
-NSBezierPath(ovalIn: badgeRect).fill()
-context.restoreGState()
 
-let badgeInset = badgeRect.insetBy(dx: 48, dy: 48)
-drawSymbol(
-    named: "power",
-    in: badgeInset,
-    color: color(0.23, 0.35, 0.86),
-    pointSize: 150,
-    weight: .bold
-)
+for dotX in [leftDotX, rightDotX] {
+    NSBezierPath(ovalIn: CGRect(x: dotX, y: dotY, width: dotDiameter, height: dotDiameter)).fill()
+}
+
+NSBezierPath(
+    roundedRect: CGRect(x: lineX, y: lineY, width: lineSize.width, height: lineSize.height),
+    xRadius: lineSize.width / 2,
+    yRadius: lineSize.width / 2
+).fill()
+
+context.restoreGState()
 
 // Inner highlight around the edge.
 context.addPath(CGPath(roundedRect: tileRect.insetBy(dx: 4, dy: 4), cornerWidth: cornerRadius - 4, cornerHeight: cornerRadius - 4, transform: nil))

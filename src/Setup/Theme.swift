@@ -3,17 +3,37 @@ import SwiftUI
 // MARK: - Design tokens
 
 enum SetupStyle {
-    static let windowWidth: CGFloat = 600
-    static let windowHeight: CGFloat = 580
-    static let contentPadding: CGFloat = 24
-    static let sectionSpacing: CGFloat = 20
-    static let itemSpacing: CGFloat = 12
-    static let iconSize: CGFloat = 72
-    static let tileSize: CGFloat = 36
+    static let windowWidth: CGFloat = 840
+    static let windowHeight: CGFloat = 640
+    static let contentPadding: CGFloat = 26
+    static let sectionSpacing: CGFloat = 22
+    static let itemSpacing: CGFloat = 14
+    static let cardPadding: CGFloat = 16
+    /// Minimum height of a card's content row so settings cards keep the same
+    /// rhythm whether they hold a summary, a note, or a trailing control.
+    static let rowMinHeight: CGFloat = 74
+    static let iconSize: CGFloat = 56
+    static let tileSize: CGFloat = 42
     static let cardCornerRadius: CGFloat = 14
     static let innerCornerRadius: CGFloat = 10
-    static let heroCornerRadius: CGFloat = 18
-    static let previewStageHeight: CGFloat = 84
+    static let previewStageHeight: CGFloat = 175
+    static let stepperWidth: CGFloat = 480
+}
+
+/// One typographic scale for the whole assistant. System semantic sizes are
+/// a little too small for a setup window that is read at a glance, so every
+/// label is sized explicitly from these tokens.
+enum SetupFont {
+    static let display = Font.system(size: 27, weight: .semibold)
+    static let hero = Font.system(size: 24, weight: .semibold)
+    static let title = Font.system(size: 19, weight: .semibold)
+    static let headline = Font.system(size: 15, weight: .semibold)
+    static let body = Font.system(size: 14)
+    static let callout = Font.system(size: 14)
+    static let secondary = Font.system(size: 13)
+    static let caption = Font.system(size: 12)
+    static let small = Font.system(size: 11)
+    static let button = Font.system(size: 14, weight: .semibold)
 }
 
 enum SetupColors {
@@ -22,6 +42,23 @@ enum SetupColors {
     static var card: Color { Color(nsColor: .textBackgroundColor) }
     static var border: Color { Color.primary.opacity(0.08) }
     static var subtleBorder: Color { Color.primary.opacity(0.05) }
+
+    /// The blue at the heart of the app icon's gradient. Every accent in the
+    /// assistant comes from this hue so the window and the icon read as one.
+    static let brandBlue = Color(red: 0.30, green: 0.47, blue: 0.96)
+
+    /// Small accent text and icons need a little more lift on dark cards, so
+    /// the accent brightens in dark mode while keeping the logo's hue.
+    static let accent = Color(nsColor: NSColor(name: "SetupAccent") { appearance in
+        let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return isDark
+            ? NSColor(srgbRed: 0.48, green: 0.65, blue: 1.00, alpha: 1)
+            : NSColor(srgbRed: 0.30, green: 0.47, blue: 0.96, alpha: 1)
+    })
+
+    /// Solid fill for prominent actions. White text stays crisp on it in both
+    /// appearances, so buttons keep the exact logo blue.
+    static var accentFill: Color { brandBlue }
 }
 
 // MARK: - Surfaces
@@ -54,7 +91,7 @@ struct SetupCard<Content: View>: View {
 /// Rounded, tinted square that anchors a row's icon.
 struct IconTile: View {
     let systemName: String
-    var tint: Color = .accentColor
+    var tint: Color = SetupColors.accent
     var size: CGFloat = SetupStyle.tileSize
 
     var body: some View {
@@ -74,37 +111,37 @@ struct IconTile: View {
 struct StepProgress: View {
     let current: Int
 
-    private let steps = ["Install", "Permissions", "Launch at Login"]
+    private let steps = ["Install", "Permissions & Login", "Try"]
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             ForEach(steps.indices, id: \.self) { index in
-                VStack(alignment: .leading, spacing: 7) {
+                VStack(alignment: .leading, spacing: 8) {
                     Capsule()
-                        .fill(index <= current ? Color.accentColor : Color.primary.opacity(0.12))
-                        .frame(height: 3)
+                        .fill(index <= current ? SetupColors.accent : Color.primary.opacity(0.12))
+                        .frame(height: 4)
 
-                    HStack(spacing: 5) {
+                    HStack(spacing: 6) {
                         if index < current {
                             Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(Color.accentColor)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(SetupColors.accent)
                         } else {
                             Text("\(index + 1)")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(index == current ? Color.accentColor : Color.secondary)
-                                .frame(width: 14, height: 14)
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(index == current ? SetupColors.accent : Color.secondary)
+                                .frame(width: 17, height: 17)
                                 .background(
                                     Circle().fill(
                                         index == current
-                                            ? Color.accentColor.opacity(0.12)
+                                            ? SetupColors.accent.opacity(0.12)
                                             : Color.primary.opacity(0.05)
                                     )
                                 )
                         }
 
                         Text(steps[index])
-                            .font(.caption2.weight(index == current ? .semibold : .regular))
+                            .font(.system(size: 12, weight: index == current ? .semibold : .regular))
                             .foregroundStyle(index == current ? Color.primary : Color.secondary)
                             .lineLimit(1)
                     }
@@ -112,6 +149,8 @@ struct StepProgress: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+        .frame(maxWidth: SetupStyle.stepperWidth, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .center)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text("Step \(current + 1) of \(steps.count): \(steps[current])"))
     }
@@ -128,11 +167,11 @@ struct StepHeader: View {
         VStack(alignment: .leading, spacing: 16) {
             StepProgress(current: step)
 
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(title)
-                    .font(.system(size: 23, weight: .semibold))
+                    .font(SetupFont.display)
                 Text(subtitle)
-                    .font(.callout)
+                    .font(SetupFont.body)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -170,15 +209,15 @@ struct StatusPill: View {
     let kind: Kind
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 5) {
             Image(systemName: kind.icon)
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: 12, weight: .semibold))
             Text(text)
-                .font(.caption.weight(.semibold))
+                .font(.system(size: 12, weight: .semibold))
         }
         .foregroundStyle(kind.color)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
         .background(Capsule().fill(kind.color.opacity(0.12)))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(text))
@@ -201,7 +240,7 @@ struct Notice: View {
 
         var tint: Color {
             switch self {
-            case .info: return .accentColor
+            case .info: return SetupColors.accent
             case .warning: return .orange
             }
         }
@@ -217,13 +256,13 @@ struct Notice: View {
     var action: (() -> Void)?
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 9) {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
             Image(systemName: kind.icon)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(kind.tint)
 
             Text(text)
-                .font(.callout)
+                .font(SetupFont.body)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -234,8 +273,8 @@ struct Notice: View {
                     .controlSize(.small)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
         .background(
             RoundedRectangle(cornerRadius: SetupStyle.innerCornerRadius, style: .continuous)
                 .fill(kind.tint.opacity(kind.fills ? 0.10 : 0.055))
@@ -248,6 +287,44 @@ struct Notice: View {
 }
 
 // MARK: - Footer
+
+/// Shared button chrome so actions line up at the same height and width instead
+/// of inheriting different system control sizes.
+struct SetupButtonStyle: ButtonStyle {
+    var prominent = false
+
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(SetupFont.button)
+            .foregroundStyle(prominent ? Color.white : Color.primary)
+            .padding(.horizontal, 20)
+            .frame(minWidth: 104, minHeight: 38)
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(fill(pressed: configuration.isPressed))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(
+                        prominent ? Color.clear : Color.primary.opacity(0.12),
+                        lineWidth: 1
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .opacity(isEnabled ? 1 : 0.5)
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+
+    private func fill(pressed: Bool) -> Color {
+        if prominent {
+            return SetupColors.accentFill.opacity(pressed ? 0.82 : 1)
+        }
+        return Color.primary.opacity(pressed ? 0.10 : 0.06)
+    }
+}
 
 struct SetupFooter<Content: View>: View {
     private let content: Content
@@ -263,8 +340,30 @@ struct SetupFooter<Content: View>: View {
                 content
             }
             .padding(.horizontal, SetupStyle.contentPadding)
-            .padding(.vertical, 14)
+            .padding(.vertical, 15)
         }
         .background(SetupColors.canvas)
+    }
+}
+
+/// Button title with an SF Symbol placed before or after the text. Used by the
+/// footer so Back, Next and Close read the same way on every step.
+struct ActionLabel: View {
+    let title: String
+    let systemName: String
+    var iconAfter = false
+
+    var body: some View {
+        HStack(spacing: 7) {
+            if !iconAfter {
+                Image(systemName: systemName)
+                    .font(.system(size: 12, weight: .semibold))
+            }
+            Text(title)
+            if iconAfter {
+                Image(systemName: systemName)
+                    .font(.system(size: 12, weight: .semibold))
+            }
+        }
     }
 }

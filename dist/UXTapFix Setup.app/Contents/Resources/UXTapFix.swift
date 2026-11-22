@@ -366,7 +366,12 @@ func accessibilityGranted() -> Bool {
 }
 
 func inputMonitoringGranted() -> Bool {
-    CGPreflightListenEventAccess()
+    // Accessibility already grants listen (and post) access. macOS can keep
+    // CGPreflightListenEventAccess() false for the lifetime of a process if
+    // Accessibility was granted after launch, even though event taps work.
+    // Treat Accessibility as the source of truth so Setup never sends the
+    // user to an Input Monitoring pane that cannot list an ad-hoc build.
+    CGPreflightListenEventAccess() || accessibilityGranted()
 }
 
 func printJSON(_ object: [String: Any]) {
@@ -408,7 +413,15 @@ func writeStatus() {
 
 func startStatusHeartbeat() {
     writeStatus()
+    var tick = 0
     _ = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
+        // Permissions granted while this process is running are cached by
+        // TCC. Retry the tap every few seconds; once it is installed there is
+        // no more work to do.
+        tick += 1
+        if tick % 3 == 0 {
+            retryEventTapIfNeeded()
+        }
         writeStatus()
     }
 }
@@ -711,6 +724,7 @@ func registerDockMiddleClick(appName: String, url: URL?) {
 // MARK: - CGEventTap (can swallow)
 
 var eventTap: CFMachPort?
+var globalMonitor: Any?
 let middleButton: Int64 = 2
 // True while a middle-button down over the Dock was swallowed; its matching up
 // must be swallowed too so the Dock does not see a half-click.
@@ -760,7 +774,7 @@ func tapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent, refc
     return Unmanaged.passUnretained(event)
 }
 
-func tryInstallEventTap() -> Bool {
+func tryInstallEventTap(logFailure: Bool = true) -> Bool {
     let mask: CGEventMask = (1 << CGEventType.otherMouseDown.rawValue)
         | (1 << CGEventType.otherMouseUp.rawValue)
         | (1 << CGEventType.leftMouseDown.rawValue)
@@ -777,7 +791,9 @@ func tryInstallEventTap() -> Bool {
         callback: tapCallback,
         userInfo: nil
     ) else {
-        print("[UXTapFix] CGEventTap failed (Input Monitoring not granted). Falling back to NSEvent global monitor.")
+        if logFailure {
+            print("[UXTapFix] CGEventTap failed (Accessibility not granted). Falling back to NSEvent global monitor.")
+        }
         return false
     }
     eventTap = tap
@@ -788,9 +804,22 @@ func tryInstallEventTap() -> Bool {
     return true
 }
 
+/// A permission can land after launch (the usual case during Setup). TCC
+/// caches the old answer in this process, so retry the tap instead of making
+/// the user restart the background service.
+func retryEventTapIfNeeded() {
+    guard eventTap == nil, accessibilityGranted() else { return }
+    if tryInstallEventTap(logFailure: false) {
+        removeGlobalMonitor()
+        print("[UXTapFix] Accessibility became available; event tap is active without a restart.")
+    }
+}
+
+
 func installGlobalMonitor() {
+    guard globalMonitor == nil else { return }
     // Passive fallback. Works with only Accessibility, but the Dock menu may flash.
-    NSEvent.addGlobalMonitorForEvents(matching: .otherMouseDown) { e in
+    globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .otherMouseDown) { e in
         guard e.buttonNumber == 2 else { return }
         // Use the event's CG location (top-left origin), not NSEvent.mouseLocation
         // (bottom-left), so the AX hit test looks at the actual Dock item.
@@ -799,6 +828,13 @@ func installGlobalMonitor() {
         DispatchQueue.main.async { registerDockMiddleClick(appName: item.name, url: item.url) }
     }
     print("[UXTapFix] NSEvent global monitor installed ✓ (passive)")
+}
+
+func removeGlobalMonitor() {
+    guard let monitor = globalMonitor else { return }
+    NSEvent.removeMonitor(monitor)
+    globalMonitor = nil
+    print("[UXTapFix] Passive monitor removed; the event tap handles clicks now.")
 }
 
 // MARK: - Main

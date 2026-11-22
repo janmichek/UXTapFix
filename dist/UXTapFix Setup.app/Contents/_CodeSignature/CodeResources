@@ -6,7 +6,7 @@
 	<dict>
 		<key>Resources/AppIcon.icns</key>
 		<data>
-		DO35+HKtdryYU9sRP44Axq1EexA=
+		cqtPrURXNMv0/wfKXbr/R07W/1o=
 		</data>
 		<key>Resources/MultitouchSupport/MultitouchSupport.h</key>
 		<data>
@@ -22,19 +22,19 @@
 		</data>
 		<key>Resources/UXTapFix.app/Contents/MacOS/UXTapFix</key>
 		<data>
-		DicmkRcpzSJ1/LGBiQsJ6fc7Hf4=
+		+r8HOOiLXQiQE0OD5tYKjtfKQNw=
 		</data>
 		<key>Resources/UXTapFix.app/Contents/Resources/AppIcon.icns</key>
 		<data>
-		DO35+HKtdryYU9sRP44Axq1EexA=
+		cqtPrURXNMv0/wfKXbr/R07W/1o=
 		</data>
 		<key>Resources/UXTapFix.app/Contents/_CodeSignature/CodeResources</key>
 		<data>
-		UUFqv7hPUHFpCwWYZnYZmbbjs5M=
+		5Ue2xzvSe1HdWBoeCj35zRC56Mc=
 		</data>
 		<key>Resources/UXTapFix.swift</key>
 		<data>
-		ICj73IkAN4vXCusPZt4rCbhbmv8=
+		lEA08cFpthWTZnFYR78C55jrCKc=
 		</data>
 		<key>Resources/scripts/README.txt</key>
 		<data>
@@ -63,7 +63,7 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			V3E+6zLhg7QgoHAA0cnXTMba887FkICZ/FPQ8EndcYE=
+			kLQIXeAe3H/Xp0765DP+PXzc8Wz70XeqFKM7UXEEd6s=
 			</data>
 		</dict>
 		<key>Resources/MultitouchSupport/MultitouchSupport.h</key>
@@ -91,28 +91,28 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			85Z7PfvDApYbTkhDMuy3c6COlCSkGrCWhvTgQ2/P4x8=
+			E+t+gQ8DbKDEG/cqxXVyseECHxNtX6qgeev7TEEbmbs=
 			</data>
 		</dict>
 		<key>Resources/UXTapFix.app/Contents/Resources/AppIcon.icns</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			V3E+6zLhg7QgoHAA0cnXTMba887FkICZ/FPQ8EndcYE=
+			kLQIXeAe3H/Xp0765DP+PXzc8Wz70XeqFKM7UXEEd6s=
 			</data>
 		</dict>
 		<key>Resources/UXTapFix.app/Contents/_CodeSignature/CodeResources</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			wcnm6h6W30dFsk49tJAFr1krEZ538Zj0TQbEwHnJQJk=
+			Dep6bhUx5CAMUsgTmSSIu3ZeihZrZHxAz+PMRZt/q3A=
 			</data>
 		</dict>
 		<key>Resources/UXTapFix.swift</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			Any8RHK2OVQD0H0C1r2idwBj/XGs/qYawiUoDSIDGcw=
+			hqwCtt8OaBszvkBMh86pHNn8QMhRr6GH9FFNZ8+QeJ0=
 			</data>
 		</dict>
 		<key>Resources/scripts/README.txt</key>

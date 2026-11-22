@@ -6,7 +6,7 @@
 #   ./install.sh --no-build   Use the existing dist/ build.
 #
 # The guided Setup app is the recommended path: it installs into your user
-# folder, walks through the two macOS permissions, and manages launch at login.
+# folder, walks through permissions and launch at login, then shows gestures to try.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -67,7 +67,7 @@ if [[ "$mode" == "guided" ]]; then
     open "$SETUP_APP"
     echo ""
     echo "UXTapFix Setup is opening. Follow the short steps:"
-    echo "  Welcome -> Permissions -> Launch at Login"
+    echo "  Welcome -> Permissions & Login -> Try"
     exit 0
 fi
 

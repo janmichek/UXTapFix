@@ -41,7 +41,7 @@ final class SetupModel: ObservableObject {
     enum Step {
         case welcome
         case permissions
-        case login
+        case finish
     }
 
     enum InstallPhase: Equatable {
@@ -211,7 +211,12 @@ final class SetupModel: ObservableObject {
 
     var serviceRunning: Bool { status?.isFresh == true }
     var accessibilityGranted: Bool { status?.accessibility == true }
-    var inputMonitoringGranted: Bool { status?.inputMonitoring == true }
+    var inputMonitoringGranted: Bool {
+        // Accessibility grants listen access too. macOS can still leave the
+        // separate preflight false in a daemon that launched before the grant,
+        // so do not make Setup wait on (or link to) the Input Monitoring pane.
+        status?.inputMonitoring == true || accessibilityGranted
+    }
 
     // MARK: Lifecycle
 
@@ -287,8 +292,8 @@ final class SetupModel: ObservableObject {
         case .welcome:
             step = .permissions
         case .permissions:
-            step = .login
-        case .login:
+            step = .finish
+        case .finish:
             NSApp.terminate(nil)
         }
     }
@@ -299,7 +304,7 @@ final class SetupModel: ObservableObject {
             break
         case .permissions:
             step = .welcome
-        case .login:
+        case .finish:
             step = .permissions
         }
     }
@@ -612,12 +617,28 @@ final class SetupModel: ObservableObject {
 
     func requestPermission(_ kind: PermissionKind) {
         guard installed else { return }
+
+        guard kind == .accessibility else {
+            // Accessibility already grants this app everything Input
+            // Monitoring does. Sending the user to that pane is a dead end:
+            // macOS does not reliably list ad-hoc builds there, and the "+"
+            // picker is the only way in. Refresh the daemon instead so the
+            // event tap can start as soon as Accessibility is in place.
+            if accessibilityGranted {
+                restartService(quiet: true)
+                infoMessage = "Input Monitoring is included with Accessibility. Restarted UXTapFix."
+            } else {
+                infoMessage = "Input Monitoring is included with Accessibility. Grant Accessibility first."
+            }
+            return
+        }
+
         // Old installs (or ad-hoc rebuilds) can leave a stale TCC entry behind:
-        // System Settings shows UXTapFix switched on, but the current app
-        // is not actually trusted. Clear the record so macOS adds the current
-        // app and shows a real grant prompt. Only do this while the daemon is
-        // reporting live status; with a stopped service the last status could
-        // be stale and clearing would revoke a permission that still works.
+        // System Settings shows UXTapFix switched on, but the current app is
+        // not actually trusted. Clear only the Accessibility record so macOS
+        // adds the current app and shows a real grant prompt. Never reset
+        // ListenEvent: that removes UXTapFix from the Input Monitoring pane,
+        // and an ad-hoc build cannot reliably add itself back.
         if status?.isFresh == true {
             _ = clearPermissionRecord(kind)
         }
@@ -632,7 +653,10 @@ final class SetupModel: ObservableObject {
 
     @discardableResult
     private func clearPermissionRecord(_ kind: PermissionKind) -> ProcessResult {
-        run("/usr/bin/tccutil", ["reset", kind.tccService, label])
+        guard kind == .accessibility else {
+            return ProcessResult(status: 0, output: "")
+        }
+        return run("/usr/bin/tccutil", ["reset", kind.tccService, label])
     }
 
     func openLoginItemsSettings() {

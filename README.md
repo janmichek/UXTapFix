@@ -56,14 +56,14 @@ The assistant is a three-step native SwiftUI app:
    force-quit escalation) plus a short summary. Click **Install** to copy
    `UXTapFix.app` to `~/Applications` and add a per-user LaunchAgent. No
    admin rights, no system-wide changes.
-2. **Permissions** — opens the exact macOS privacy panes and shows permission
-   status live, read from the running background service.
-3. **Launch at Login** — confirms the LaunchAgent so the utility is ready every
-   time you log in. You can turn this off at any time. **Continue** closes the
-   assistant.
+2. **Permissions & Login** — opens the exact macOS privacy panes and shows
+   permission status live, read from the running background service. The
+   **Start UXTapFix when I log in** switch lives here too, so the utility is
+   ready every time you log in. You can turn it off at any time.
+3. **Try** — shows a few gestures to try. **Try** closes the assistant.
 
 The assistant copies itself to `~/Applications/UXTapFix Setup.app`, so
-you can reopen it later to review permission status. The toolbar has a **Quit**
+you can reopen it later to review permission status. The footer has a **Close**
 button.
 
 If an old copy exists at `/Applications/UXTapFix.app`, Setup stops it,
@@ -75,29 +75,39 @@ macOS requires you to flip these switches yourself; no app can do it for you.
 
 | Permission | Why | Required |
 | --- | --- | --- |
-| **Accessibility** | Ask macOS which Dock icon is under the pointer. | Yes |
-| **Input Monitoring** | Catch the middle click before the Dock flashes its menu, and rewrite a three-finger physical click. | Recommended |
+| **Accessibility** | Ask macOS which Dock icon is under the pointer, and create the event tap that catches middle clicks. | Yes |
+| **Input Monitoring** | Included automatically with Accessibility. No separate switch is needed. | Built in |
 
-Click **Grant Access** on a permission row. The assistant asks the daemon
-process to register with macOS, then opens the matching System Settings pane.
-The row updates within a couple of seconds after you flip the switch.
+Click **Open System Settings** on the Accessibility row. The assistant asks the
+daemon process to register with macOS, then opens the matching System Settings
+pane. The row updates within a couple of seconds after you flip the switch.
+
+macOS does not reliably list ad-hoc builds in the **Input Monitoring** pane.
+UXTapFix does not need a separate entry there: Accessibility already grants
+both listen and post access, so the event tap works with Accessibility alone.
+If Setup shows Input Monitoring as optional, it becomes **Granted** as soon as
+Accessibility is granted.
 
 ### If the switch looks on but status stays off
 
 That usually means the permission belongs to an older build with a different
-code signature. Click **Grant Access** again. While the service is reporting
-live status, Setup clears the stale record with `tccutil` first so macOS can
-add the current app.
+code signature. Click **Open System Settings** again. While the service is
+reporting live status, Setup clears the stale Accessibility record with
+`tccutil` first so macOS can add the current app.
 
 The terminal equivalent:
 
 ```sh
 tccutil reset Accessibility com.user.uxtapfix
-tccutil reset ListenEvent com.user.uxtapfix
 ```
 
+Do **not** reset `ListenEvent`: it removes UXTapFix from the Input Monitoring
+list, and an ad-hoc build cannot reliably add itself back. The app does not
+need that entry.
+
 After granting a permission, the assistant automatically restarts the service
-so the event tap picks it up.
+so the event tap picks it up. The daemon also retries the tap on its own, so a
+grant that lands after launch does not require a manual restart.
 
 ## Launch at login
 
@@ -108,8 +118,9 @@ Setup writes a per-user LaunchAgent:
 ```
 
 It starts UXTapFix when you log in and restarts it if it exits. Toggle
-**Launch at login** in the assistant to enable or disable it. Turning it off
-stops the service and removes the plist; nothing else is affected.
+**Start UXTapFix when I log in** on the **Permissions & Login** step to enable
+or disable it. Turning it off stops the service and removes the plist; nothing
+else is affected.
 
 ## Three-finger tap and click
 
@@ -242,8 +253,9 @@ from the DMG without the repository.
 
 1. A `CGEventTap` listens for `otherMouseDown` with button number 2 (middle
    click). It swallows the click when the pointer is over the Dock so the Dock
-   context menu does not flash. If Input Monitoring is unavailable, an
-   `NSEvent` global monitor is a passive fallback.
+   context menu does not flash. Accessibility grants both listen and post
+   access; if the tap cannot be created, an `NSEvent` global monitor is a
+   passive fallback.
 2. The private `MultitouchSupport.framework` reports trackpad touch frames. A
    short, still three-finger tap posts a real middle click at the pointer. A
    physical left/right click while three fingers are down is rewritten in the
@@ -274,8 +286,9 @@ approvals can be stale.
 
 **Middle-click does nothing.** Check `~/Library/Logs/UXTapFix.log`. Grant
 Accessibility, then run
-`~/Library/Application\ Support/UXTapFix/restart.sh`. If the log mentions
-`CGEventTap failed`, enable Input Monitoring as well.
+`~/Library/Application\ Support/UXTapFix/restart.sh`. If the log says
+`CGEventTap failed`, the event tap is waiting for Accessibility. Input
+Monitoring is included with Accessibility and does not need a separate grant.
 
 **Three-finger tap does nothing.** Check the log for
 `Three-finger middle-click enabled`. If it says no multitouch device was found,
@@ -293,7 +306,7 @@ does; UXTapFix only posts the click. Test with a mouse that has a real
 middle button. Chrome, Safari, Firefox, Arc, and most other browsers close a
 tab when its tab is middle-clicked.
 
-**The service is stopped.** Open the Launch at Login step and make sure
+**The service is stopped.** Open the Permissions & Login step and make sure
 **Start UXTapFix when I log in** is on. You can also run
 `~/Library/Application\ Support/UXTapFix/restart.sh`.
 

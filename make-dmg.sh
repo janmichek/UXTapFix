@@ -38,7 +38,7 @@ INSTALL
    That warning appears because this build is ad-hoc signed, not notarized.
 
 2. Follow the three steps:
-   Welcome -> Permissions -> Launch at Login.
+   Welcome -> Permissions & Login -> Try.
 
    No admin password is needed. The app is installed in your user folder:
    ~/Applications/UXTapFix.app
@@ -49,13 +49,15 @@ flag and opens the same assistant.
 
 PERMISSIONS
 -----------
-macOS requires you to approve two switches manually:
-  - Accessibility (required)
-  - Input Monitoring (recommended)
+macOS requires you to approve Accessibility manually. Input Monitoring is
+included automatically with Accessibility, so no separate switch is needed.
+The Permissions & Login step also has the switch that starts UXTapFix when
+you log in. Leave it on so the utility keeps running in the background.
 
 The Setup app opens the exact System Settings pane and updates live when the
-switch is on. If a switch already looks on but status stays off, click Grant
-Access again. Setup clears the old entry left behind by a previous build.
+switch is on. If Accessibility already looks on but status stays off, click
+Open System Settings again. Setup clears the old entry left behind by a
+previous build.
 
 THREE-FINGER TAP
 ----------------

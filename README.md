@@ -23,7 +23,7 @@ open "dist/UXTapFix Setup.app"
 
 From a DMG, open **UXTapFix Setup.app**. The release is ad-hoc signed, not notarized. Verify the SHA-256 that `make-dmg.sh` prints against the downloaded file. If macOS blocks the app, right-click it and choose **Open**, or double-click **Install UXTapFix.command** (it copies Setup to a writable temp folder, clears quarantine, and opens it).
 
-`./make-dmg.sh` writes `dist/UXTapFix-2.3.dmg` with Setup, `Install UXTapFix.command`, and `Read Me.txt`. Setup embeds the daemon, so the DMG works without the repository.
+`./make-dmg.sh` writes `dist/UXTapFix-2.4.dmg` with Setup, `Install UXTapFix.command`, and `Read Me.txt`. Setup embeds the daemon, so the DMG works without the repository. The release is a universal build for Apple silicon and Intel.
 
 ## Setup
 

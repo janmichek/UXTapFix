@@ -11,6 +11,13 @@ BUILD="$ROOT/build"
 ARCH="$(uname -m)"
 TARGET="$ARCH-apple-macos13.0"
 VERSION="$(plutil -extract CFBundleShortVersionString raw "$ROOT/bundle/Info.plist")"
+SETUP_VERSION="$(plutil -extract CFBundleShortVersionString raw "$ROOT/bundle/Setup-Info.plist")"
+
+if [[ "$VERSION" != "$SETUP_VERSION" ]]; then
+    echo "Version mismatch: daemon is $VERSION but Setup is $SETUP_VERSION." >&2
+    echo "Keep bundle/Info.plist and bundle/Setup-Info.plist in sync." >&2
+    exit 1
+fi
 
 echo "Building UXTapFix $VERSION -> $OUT"
 
@@ -33,7 +40,7 @@ swiftc "$ROOT/src/UXTapFix.swift" \
   -target "$TARGET" \
   -I "$ROOT/src/MultitouchSupport" \
   -F /System/Library/PrivateFrameworks \
-  -framework MultitouchSupport \
+  -Xlinker -weak_framework -Xlinker MultitouchSupport \
   -framework Cocoa \
   -framework ApplicationServices \
   -framework ServiceManagement

@@ -26,13 +26,9 @@ enum SetupStyle {
 enum SetupFont {
     static let display = Font.system(size: 27, weight: .semibold)
     static let hero = Font.system(size: 24, weight: .semibold)
-    static let title = Font.system(size: 19, weight: .semibold)
     static let headline = Font.system(size: 15, weight: .semibold)
     static let body = Font.system(size: 14)
-    static let callout = Font.system(size: 14)
     static let secondary = Font.system(size: 13)
-    static let caption = Font.system(size: 12)
-    static let small = Font.system(size: 11)
     static let button = Font.system(size: 14, weight: .semibold)
 }
 
@@ -109,40 +105,45 @@ struct IconTile: View {
 // MARK: - Progress
 
 struct StepProgress: View {
-    let current: Int
+    let current: SetupModel.Step
 
-    private let steps = ["Install", "Permissions & Login", "Finish"]
+    private let steps: [(SetupModel.Step, String)] = [
+        (.welcome, "Install"),
+        (.permissions, "Permissions & Login"),
+        (.finish, "Finish")
+    ]
 
     var body: some View {
+        let currentIndex = steps.firstIndex(where: { $0.0 == current }) ?? 0
         HStack(alignment: .top, spacing: 10) {
-            ForEach(steps.indices, id: \.self) { index in
+            ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
                 VStack(alignment: .leading, spacing: 8) {
                     Capsule()
-                        .fill(index <= current ? SetupColors.accent : Color.primary.opacity(0.12))
+                        .fill(index <= currentIndex ? SetupColors.accent : Color.primary.opacity(0.12))
                         .frame(height: 4)
 
                     HStack(spacing: 6) {
-                        if index < current {
+                        if index < currentIndex {
                             Image(systemName: "checkmark.circle.fill")
                                 .font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(SetupColors.accent)
                         } else {
                             Text("\(index + 1)")
                                 .font(.system(size: 11, weight: .bold))
-                                .foregroundStyle(index == current ? SetupColors.accent : Color.secondary)
+                                .foregroundStyle(index == currentIndex ? SetupColors.accent : Color.secondary)
                                 .frame(width: 17, height: 17)
                                 .background(
                                     Circle().fill(
-                                        index == current
+                                        index == currentIndex
                                             ? SetupColors.accent.opacity(0.12)
                                             : Color.primary.opacity(0.05)
                                     )
                                 )
                         }
 
-                        Text(steps[index])
-                            .font(.system(size: 12, weight: index == current ? .semibold : .regular))
-                            .foregroundStyle(index == current ? Color.primary : Color.secondary)
+                        Text(step.1)
+                            .font(.system(size: 12, weight: index == currentIndex ? .semibold : .regular))
+                            .foregroundStyle(index == currentIndex ? Color.primary : Color.secondary)
                             .lineLimit(1)
                     }
                 }
@@ -152,14 +153,14 @@ struct StepProgress: View {
         .frame(maxWidth: SetupStyle.stepperWidth, alignment: .leading)
         .frame(maxWidth: .infinity, alignment: .center)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text("Step \(current + 1) of \(steps.count): \(steps[current])"))
+        .accessibilityLabel(Text("Step \(currentIndex + 1) of \(steps.count): \(steps[currentIndex].1)"))
     }
 }
 
 // MARK: - Headers
 
 struct StepHeader: View {
-    let step: Int
+    let step: SetupModel.Step
     let title: String
     let subtitle: String
 
@@ -188,13 +189,11 @@ struct StatusLabel: View {
     enum Kind {
         case granted
         case required
-        case optional
 
         var icon: String {
             switch self {
             case .granted: return "checkmark.circle.fill"
             case .required: return "exclamationmark.circle.fill"
-            case .optional: return "minus.circle.fill"
             }
         }
 
@@ -202,7 +201,6 @@ struct StatusLabel: View {
             switch self {
             case .granted: return .green
             case .required: return .orange
-            case .optional: return .secondary
             }
         }
     }

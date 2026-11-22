@@ -17,7 +17,7 @@ struct UXTapFixSetupApp: App {
     }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         if let appearance = SnapshotSupport.appearance {
             NSApp.appearance = appearance
@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         DispatchQueue.main.async {
             for window in NSApp.windows {
+                window.delegate = self
                 window.title = "UXTapFix Setup"
                 window.titlebarAppearsTransparent = true
                 window.standardWindowButton(.closeButton)?.isHidden = false
@@ -70,6 +71,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !SetupActivity.shared.isBusy else {
+            NSSound.beep()
+            return .terminateCancel
+        }
+        return .terminateNow
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard !SetupActivity.shared.isBusy else {
+            NSSound.beep()
+            return false
+        }
+        return true
     }
 }
 
@@ -126,7 +143,8 @@ struct SetupRootView: View {
                     model.status = DaemonStatus(
                         accessibility: false,
                         inputMonitoring: false,
-                        updatedAt: Date()
+                        updatedAt: Date(),
+                        pid: nil
                     )
                 }
             }
@@ -137,6 +155,14 @@ struct SetupRootView: View {
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                 guard SnapshotSupport.outputPath == nil else { return }
                 model.refresh()
+            }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if let message = model.infoMessage, !message.isEmpty {
+                    Notice(text: message)
+                        .padding(.horizontal, SetupStyle.contentPadding)
+                        .padding(.top, 8)
+                        .padding(.bottom, 4)
+                }
             }
             .alert("Something went wrong", isPresented: errorBinding) {
                 Button("OK") { model.errorMessage = nil }
@@ -167,14 +193,19 @@ struct SetupRootView: View {
 
 // MARK: - Welcome
 
+private final class WelcomeAdvanceState: ObservableObject {
+    @Published var inProgress = false
+}
+
 struct WelcomeView: View {
     @ObservedObject var model: SetupModel
+    @StateObject private var advance = WelcomeAdvanceState()
 
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: SetupStyle.sectionSpacing) {
-                    StepProgress(current: 0)
+                    StepProgress(current: .welcome)
 
                     WelcomeHero()
 
@@ -212,16 +243,24 @@ struct WelcomeView: View {
                     ActionLabel(title: "Close", systemName: "xmark")
                 }
                 .buttonStyle(SetupButtonStyle())
-                .disabled(model.busy)
+                .disabled(model.busy || advance.inProgress)
 
                 Spacer()
 
                 if !model.busy {
                     Button {
-                        if model.installed {
-                            model.goNext()
-                        } else {
-                            Task { await model.install() }
+                        guard !advance.inProgress else { return }
+                        advance.inProgress = true
+                        Task {
+                            if model.installed {
+                                await model.retireLegacySystemCopy()
+                                if model.errorMessage == nil {
+                                    model.goNext()
+                                }
+                            } else {
+                                await model.install()
+                            }
+                            advance.inProgress = false
                         }
                     } label: {
                         ActionLabel(
@@ -231,6 +270,7 @@ struct WelcomeView: View {
                         )
                     }
                     .buttonStyle(SetupButtonStyle(prominent: true))
+                    .disabled(advance.inProgress)
                     .keyboardShortcut(.defaultAction)
                 }
             }
@@ -241,9 +281,9 @@ struct WelcomeView: View {
 // MARK: - Install progress
 
 private let installSteps: [SetupModel.InstallPhase] = [
-    .stopping,
     .copying,
     .registering,
+    .stopping,
     .starting,
     .finished
 ]
@@ -342,7 +382,7 @@ struct PermissionsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: SetupStyle.sectionSpacing) {
                     StepHeader(
-                        step: 1,
+                        step: .permissions,
                         title: "Permissions & Login",
                         subtitle: "macOS asks for Accessibility before UXTapFix can see Dock clicks."
                     )
@@ -360,7 +400,7 @@ struct PermissionsView: View {
                         PermissionRow(
                             kind: .accessibility,
                             granted: model.accessibilityGranted,
-                            waiting: model.requestedPermission == .accessibility,
+                            waiting: model.permissionRequestBusy,
                             onGrant: { model.requestPermission(.accessibility) }
                         )
                     }
@@ -410,6 +450,13 @@ struct PermissionsView: View {
                 }
                 .buttonStyle(SetupButtonStyle())
 
+                Button {
+                    NSApp.terminate(nil)
+                } label: {
+                    ActionLabel(title: "Close", systemName: "xmark")
+                }
+                .buttonStyle(SetupButtonStyle())
+
                 Spacer()
 
                 Button {
@@ -435,13 +482,11 @@ struct PermissionRow: View {
     let onGrant: () -> Void
 
     private var statusKind: StatusLabel.Kind {
-        if granted { return .granted }
-        return kind.isRequired ? .required : .optional
+        granted ? .granted : .required
     }
 
     private var statusText: String {
-        if granted { return "Granted" }
-        return kind.isRequired ? "Required" : "Optional"
+        granted ? "Granted" : "Required"
     }
 
     var body: some View {
@@ -490,7 +535,7 @@ struct FinishView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: SetupStyle.sectionSpacing) {
                     StepHeader(
-                        step: 2,
+                        step: .finish,
                         title: "Finish",
                         subtitle: "Everything is set up. Try the gestures below, then click Finish to close Setup."
                     )
@@ -569,6 +614,14 @@ struct FinishView: View {
                     ActionLabel(title: "Back", systemName: "chevron.left")
                 }
                 .buttonStyle(SetupButtonStyle())
+
+                Button {
+                    NSApp.terminate(nil)
+                } label: {
+                    ActionLabel(title: "Close", systemName: "xmark")
+                }
+                .buttonStyle(SetupButtonStyle())
+
                 Spacer()
                 Button {
                     model.goNext()

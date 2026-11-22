@@ -32,24 +32,27 @@ Scripts
       files, log, and privacy records. Add --yes to skip the confirmation.
 
   enable-finder-quit.sh
-      Advanced: rebuilds the daemon with Finder removed from the blacklist.
-      Finder normally reopens instantly, so this is off by default. The rebuild
-      changes the ad-hoc signature, so Accessibility must be approved again.
-      Reinstalling from Setup restores the normal build.
+      Advanced: sets middleClickAllowFinderQuit and restarts the service.
+      Finder normally reopens instantly, so this is off by default. No rebuild
+      and no permission reset are involved. Reinstall or run:
+        defaults write com.user.uxtapfix middleClickAllowFinderQuit -bool false
+        launchctl kickstart -k gui/$(id -u)/com.user.uxtapfix
+      to restore the default.
 
 Permissions (manual, by macOS design)
 -------------------------------------
-  1. System Settings -> Privacy & Security -> Accessibility
-     Enable UXTapFix.
-  2. System Settings -> Privacy & Security -> Input Monitoring
-     Enable UXTapFix (recommended; makes quitting smoother).
+  System Settings -> Privacy & Security -> Accessibility
+  Enable UXTapFix. The active event tap uses Accessibility, so no separate
+  Input Monitoring switch is needed for this build.
 
-  If a switch already looks on but status still shows false, the entry belongs
-  to an older build. In Setup, click Grant Access again; it clears the stale
-  record first. The equivalent terminal command is:
+  If the switch already looks on but status still shows false, the entry
+  belongs to an older build. In Setup, click Open System Settings again; it
+  clears the stale Accessibility record first. The equivalent terminal command:
 
     tccutil reset Accessibility com.user.uxtapfix
-    tccutil reset ListenEvent com.user.uxtapfix
+
+  Do not reset ListenEvent. That removes UXTapFix from Input Monitoring, and
+  an ad-hoc build cannot reliably add itself back.
 
 Launch at login
 ---------------

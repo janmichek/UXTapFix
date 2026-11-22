@@ -496,13 +496,6 @@ struct PermissionsView: View {
                         .frame(minHeight: SetupStyle.rowMinHeight)
                         .animation(.easeInOut(duration: 0.18), value: model.launchAtLogin)
                     }
-
-                    if !model.launchAtLogin {
-                        Notice(
-                            text: "UXTapFix won't keep running in the background until you turn this on.",
-                            kind: .warning
-                        )
-                    }
                 }
                 .padding(SetupStyle.contentPadding)
                 .frame(maxWidth: .infinity, alignment: .leading)

@@ -436,7 +436,7 @@ struct PermissionRow: View {
     let waiting: Bool
     let onGrant: () -> Void
 
-    private var statusKind: StatusPill.Kind {
+    private var statusKind: StatusLabel.Kind {
         if granted { return .granted }
         return kind.isRequired ? .required : .optional
     }
@@ -451,8 +451,12 @@ struct PermissionRow: View {
             IconTile(systemName: kind.icon)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text(kind.displayName)
-                    .font(SetupFont.headline)
+                HStack(spacing: 8) {
+                    Text(kind.displayName)
+                        .font(SetupFont.headline)
+
+                    StatusLabel(text: statusText, kind: statusKind)
+                }
 
                 Text(kind.summary)
                     .font(SetupFont.body)
@@ -462,20 +466,16 @@ struct PermissionRow: View {
 
             Spacer(minLength: 12)
 
-            VStack(alignment: .trailing, spacing: 8) {
-                StatusPill(text: statusText, kind: statusKind)
-
-                if !granted {
-                    Button(action: onGrant) {
-                        HStack(spacing: 6) {
-                            Image(systemName: waiting ? "clock" : "arrow.up.forward.app")
-                                .font(.system(size: 12, weight: .semibold))
-                            Text(waiting ? "Waiting for approval…" : "Open System Settings")
-                        }
+            if !granted {
+                Button(action: onGrant) {
+                    HStack(spacing: 6) {
+                        Image(systemName: waiting ? "clock" : "arrow.up.forward.app")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text(waiting ? "Waiting for approval…" : "Open System Settings")
                     }
-                    .buttonStyle(SetupButtonStyle())
-                    .disabled(waiting)
                 }
+                .buttonStyle(SetupButtonStyle())
+                .disabled(waiting)
             }
         }
         .frame(minHeight: SetupStyle.rowMinHeight)

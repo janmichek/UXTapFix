@@ -182,7 +182,9 @@ struct StepHeader: View {
 
 // MARK: - Status
 
-struct StatusPill: View {
+/// Compact inline status that sits beside a row's title. Kept text-only so a
+/// permission row needs just one trailing control on the right.
+struct StatusLabel: View {
     enum Kind {
         case granted
         case required
@@ -209,16 +211,13 @@ struct StatusPill: View {
     let kind: Kind
 
     var body: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 4) {
             Image(systemName: kind.icon)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 11, weight: .semibold))
             Text(text)
                 .font(.system(size: 12, weight: .semibold))
         }
         .foregroundStyle(kind.color)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 4)
-        .background(Capsule().fill(kind.color.opacity(0.12)))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(text))
     }

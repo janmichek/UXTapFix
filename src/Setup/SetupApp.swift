@@ -178,9 +178,13 @@ struct WelcomeView: View {
 
                     WelcomeHero()
 
-                    HStack(alignment: .top, spacing: SetupStyle.itemSpacing) {
-                        ForEach(FeaturePreviewKind.allCases) { kind in
-                            FeaturePreviewCard(kind: kind)
+                    if model.busy {
+                        InstallProgressCard(phase: model.installPhase)
+                    } else {
+                        HStack(alignment: .top, spacing: SetupStyle.itemSpacing) {
+                            ForEach(FeaturePreviewKind.allCases) { kind in
+                                FeaturePreviewCard(kind: kind)
+                            }
                         }
                     }
 
@@ -214,15 +218,7 @@ struct WelcomeView: View {
 
                 Spacer()
 
-                if model.busy {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text(model.installPhase.label)
-                            .font(SetupFont.body)
-                            .foregroundStyle(.secondary)
-                    }
-                } else {
+                if !model.busy {
                     Button {
                         if model.installed {
                             model.goNext()
@@ -240,6 +236,100 @@ struct WelcomeView: View {
                     .keyboardShortcut(.defaultAction)
                 }
             }
+        }
+    }
+}
+
+// MARK: - Install progress
+
+private let installSteps: [SetupModel.InstallPhase] = [
+    .stopping,
+    .copying,
+    .registering,
+    .starting,
+    .finished
+]
+
+private struct InstallProgressCard: View {
+    let phase: SetupModel.InstallPhase
+
+    private var activeIndex: Int {
+        installSteps.firstIndex(of: phase) ?? installSteps.count
+    }
+
+    var body: some View {
+        SetupCard(padding: SetupStyle.cardPadding) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Installing UXTapFix")
+                    .font(SetupFont.headline)
+
+                VStack(alignment: .leading, spacing: 9) {
+                    ForEach(installSteps.indices, id: \.self) { index in
+                        InstallProgressRow(
+                            title: installSteps[index].label,
+                            state: state(for: index)
+                        )
+                    }
+                }
+            }
+            .frame(minHeight: SetupStyle.previewStageHeight + 20, alignment: .topLeading)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text("Installation progress"))
+    }
+
+    private func state(for index: Int) -> InstallProgressRow.State {
+        if index < activeIndex { return .done }
+        if index == activeIndex { return .current }
+        return .pending
+    }
+}
+
+private struct InstallProgressRow: View {
+    enum State {
+        case done
+        case current
+        case pending
+
+        var icon: String {
+            switch self {
+            case .done: return "checkmark.circle.fill"
+            case .current: return "circle.inset.filled"
+            case .pending: return "circle"
+            }
+        }
+
+        var tint: Color {
+            switch self {
+            case .done, .current: return SetupColors.accent
+            case .pending: return Color.secondary.opacity(0.5)
+            }
+        }
+    }
+
+    let title: String
+    let state: State
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Image(systemName: state.icon)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(state.tint)
+                .frame(width: 16)
+
+            Text(state == .current ? "\(title)…" : title)
+                .font(state == .current ? .system(size: 14, weight: .semibold) : SetupFont.body)
+                .foregroundStyle(state == .pending ? Color.secondary : Color.primary)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(accessibilityText))
+    }
+
+    private var accessibilityText: String {
+        switch state {
+        case .done: return "\(title), done"
+        case .current: return "\(title), in progress"
+        case .pending: return "\(title), waiting"
         }
     }
 }

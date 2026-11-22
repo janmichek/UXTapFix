@@ -492,9 +492,20 @@ struct PermissionsView: View {
                             ))
                             .labelsHidden()
                             .toggleStyle(.switch)
+                            .opacity(model.launchAtLoginBusy ? 0 : 1)
+                            .disabled(model.launchAtLoginBusy)
+                            .overlay {
+                                if model.launchAtLoginBusy {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                        .allowsHitTesting(false)
+                                        .accessibilityLabel("Updating launch at login")
+                                }
+                            }
                         }
                         .frame(minHeight: SetupStyle.rowMinHeight)
                         .animation(.easeInOut(duration: 0.18), value: model.launchAtLogin)
+                        .animation(.easeInOut(duration: 0.15), value: model.launchAtLoginBusy)
                     }
                 }
                 .padding(SetupStyle.contentPadding)

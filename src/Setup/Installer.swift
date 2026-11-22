@@ -123,6 +123,9 @@ final class SetupModel: ObservableObject {
     /// until macOS reports a grant, so a stale switch can be cleared again.
     @Published var permissionRequestBusy = false
     @Published var restartingService = false
+    /// True while the launch-at-login toggle is writing the login item and
+    /// starting or stopping the service. The toggle shows a spinner meanwhile.
+    @Published var launchAtLoginBusy = false
     @Published var hadLegacyInstall = false
     @Published var legacyLoginItemPresent = false
     @Published var middleClickAppRunning = false
@@ -652,6 +655,21 @@ final class SetupModel: ObservableObject {
     }
 
     private func writeLaunchAgent() throws {
+        try Self.writeLaunchAgent(
+            label: label,
+            launchAgentURL: launchAgentURL,
+            logURL: logURL,
+            daemonBinaryURL: daemonBinaryURL
+        )
+    }
+
+    nonisolated private static func writeLaunchAgent(
+        label: String,
+        launchAgentURL: URL,
+        logURL: URL,
+        daemonBinaryURL: URL
+    ) throws {
+        let fileManager = FileManager.default
         let logDirectory = logURL.deletingLastPathComponent()
         try fileManager.createDirectory(at: logDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: launchAgentURL.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -672,18 +690,26 @@ final class SetupModel: ObservableObject {
     }
 
     private func startService() throws {
-        _ = run("/bin/launchctl", ["bootout", domainLabel])
-        var result = run("/bin/launchctl", ["bootstrap", domain, launchAgentURL.path])
+        try Self.startService(domain: domain, domainLabel: domainLabel, launchAgentURL: launchAgentURL)
+    }
+
+    nonisolated private static func startService(
+        domain: String,
+        domainLabel: String,
+        launchAgentURL: URL
+    ) throws {
+        _ = runTool("/bin/launchctl", ["bootout", domainLabel])
+        var result = runTool("/bin/launchctl", ["bootstrap", domain, launchAgentURL.path])
         if result.status != 0 {
             // A stopped service can occasionally still be registered for a moment.
-            _ = run("/bin/launchctl", ["bootout", domainLabel])
+            _ = runTool("/bin/launchctl", ["bootout", domainLabel])
             usleep(250_000)
-            result = run("/bin/launchctl", ["bootstrap", domain, launchAgentURL.path])
+            result = runTool("/bin/launchctl", ["bootstrap", domain, launchAgentURL.path])
         }
         guard result.status == 0 else {
             throw InstallerError(message: "macOS could not start the background service.\n\n\(result.output)\n\nTry again, or open the log for details.")
         }
-        let kick = run("/bin/launchctl", ["kickstart", "-k", domainLabel])
+        let kick = runTool("/bin/launchctl", ["kickstart", "-k", domainLabel])
         guard kick.status == 0 else {
             throw InstallerError(message: "The login item was added, but the service did not start.\n\n\(kick.output)")
         }
@@ -733,20 +759,53 @@ final class SetupModel: ObservableObject {
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {
+        guard !launchAtLoginBusy else { return }
         errorMessage = nil
-        if enabled {
-            do {
-                try writeLaunchAgent()
-                try startService()
-                launchAtLogin = true
-                refresh()
-            } catch {
-                errorMessage = error.localizedDescription
+        launchAtLoginBusy = true
+        SetupActivity.shared.begin()
+
+        let label = label
+        let domain = domain
+        let domainLabel = domainLabel
+        let launchAgentURL = launchAgentURL
+        let logURL = logURL
+        let daemonBinaryURL = daemonBinaryURL
+
+        // launchctl can block for a moment, so keep it off the main thread and
+        // let the toggle show a spinner until the login item is settled.
+        Task.detached(priority: .userInitiated) {
+            var failure: String?
+            if enabled {
+                do {
+                    try Self.writeLaunchAgent(
+                        label: label,
+                        launchAgentURL: launchAgentURL,
+                        logURL: logURL,
+                        daemonBinaryURL: daemonBinaryURL
+                    )
+                    try Self.startService(
+                        domain: domain,
+                        domainLabel: domainLabel,
+                        launchAgentURL: launchAgentURL
+                    )
+                } catch {
+                    failure = error.localizedDescription
+                }
+            } else {
+                _ = Self.runTool("/bin/launchctl", ["bootout", domainLabel])
+                try? FileManager.default.removeItem(at: launchAgentURL)
             }
-        } else {
-            _ = stopService()
-            try? fileManager.removeItem(at: launchAgentURL)
-            launchAtLogin = false
+
+            let failureMessage = failure
+            await MainActor.run {
+                if let failureMessage {
+                    self.errorMessage = failureMessage
+                }
+                self.launchAtLogin = enabled
+                self.refresh()
+                self.launchAtLoginBusy = false
+                SetupActivity.shared.end()
+            }
         }
     }
 

@@ -193,9 +193,7 @@ struct WelcomeView: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    if model.installed {
-                        Notice(text: "UXTapFix is already installed. Choose Next to review its permissions.")
-                    } else if model.hadLegacyInstall {
+                    if model.hadLegacyInstall {
                         Notice(
                             text: "An older copy in /Applications will be moved to the Trash.",
                             kind: .warning

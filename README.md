@@ -60,7 +60,7 @@ The assistant is a three-step native SwiftUI app:
    permission status live, read from the running background service. The
    **Start UXTapFix when I log in** switch lives here too, so the utility is
    ready every time you log in. You can turn it off at any time.
-3. **Try** — shows a few gestures to try. **Try** closes the assistant.
+3. **Finish** — shows a few gestures to try. **Finish** closes the assistant.
 
 The assistant copies itself to `~/Applications/UXTapFix Setup.app`, so
 you can reopen it later to review permission status. The footer has a **Close**
@@ -85,8 +85,8 @@ pane. The row updates within a couple of seconds after you flip the switch.
 macOS does not reliably list ad-hoc builds in the **Input Monitoring** pane.
 UXTapFix does not need a separate entry there: Accessibility already grants
 both listen and post access, so the event tap works with Accessibility alone.
-If Setup shows Input Monitoring as optional, it becomes **Granted** as soon as
-Accessibility is granted.
+Setup therefore shows a single Accessibility row; Input Monitoring counts as
+granted as soon as Accessibility is.
 
 ### If the switch looks on but status stays off
 
@@ -135,17 +135,22 @@ is posted system-wide, so the app under the pointer decides what to do:
 | A link | The browser opens it in a background tab |
 | Terminal | Selected text is pasted |
 
-Repeating the middle-click on the same Dock icon escalates:
+Repeating the middle-click on the same Dock icon:
 
 | Middle-clicks on one Dock icon | What happens |
 | --- | --- |
-| 1× | The app quits normally. |
-| 2× | The app and its background helper processes quit; anything still running is forced after 1.2 s. |
+| 1× | The app and any helpers it leaves behind quit; its Dock tile is cleared. |
+| 2× | Same as a single click; there is no separate 2× action. |
 | 3× | The app and its helpers are force-quit immediately. |
+
+On macOS 26 and later, a quit app can leave its Dock icon behind with a
+**Running in Background** label. After a normal or force quit, UXTapFix also
+presses the Dock's own **Stop Running in Background** command when that state
+is present, so the icon goes away instead of lingering.
 
 Clicks count as a sequence when they follow each other within your Mac's
 double-click speed (about half a second by default), so a single click waits
-that long before the app quits. A third click force-quits right away.
+that long before the app quits. A third click or tap force-quits right away.
 Middle-clicks anywhere other than the Dock are never counted or delayed.
 
 The gesture is built in. You do **not** need MiddleClick anymore. If
@@ -179,8 +184,8 @@ launchctl kickstart -k gui/$(id -u)/com.user.uxtapfix
   disables the tap gesture.
 - `middleClickMaxTimeDelta` is milliseconds; `middleClickMaxDistanceDelta` is
   in normalized trackpad units.
-- `middleClickMultiAction false` turns off the 1×/2×/3× escalation: a single
-  click quits immediately again and extra clicks behave like single clicks.
+- `middleClickMultiAction false` turns off the 3× force-quit escalation: a
+  single click quits immediately and extra clicks behave like single clicks.
 - `middleClickMultiClickWindow` is milliseconds, minimum 150. It is the
   longest gap allowed between repeated clicks on the same Dock icon. By
   default it follows your Mac's double-click setting (at least 500 ms), so

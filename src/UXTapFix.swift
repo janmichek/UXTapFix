@@ -582,9 +582,8 @@ func isBlacklisted(_ name: String) -> Bool {
 }
 
 enum QuitMode {
-    case normal      // graceful quit, the v2.3 behavior
-    case background  // quit the app and its helpers, force leftovers after a grace period
-    case force       // immediate force quit
+    case normal  // graceful quit, then clear any background activity
+    case force   // immediate force quit
 }
 
 func backgroundHelpers(of app: NSRunningApplication) -> [NSRunningApplication] {
@@ -601,12 +600,245 @@ func backgroundHelpers(of app: NSRunningApplication) -> [NSRunningApplication] {
     }
 }
 
-func scheduleForceTerminate(_ apps: [NSRunningApplication], after delay: TimeInterval) {
-    DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-        for app in apps where !app.isTerminated {
-            app.forceTerminate()
+/// Every process below `pid` in the process tree, captured before the app
+/// exits. Helpers are usually `NSRunningApplication` instances, but terminal
+/// jobs and language servers are plain child processes.
+func descendantProcessIDs(of pid: pid_t) -> [pid_t] {
+    var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
+    var size: size_t = 0
+    guard sysctl(&mib, u_int(mib.count), nil, &size, nil, 0) == 0, size > 0 else { return [] }
+
+    let capacity = size / MemoryLayout<kinfo_proc>.stride
+    var processes = [kinfo_proc](repeating: kinfo_proc(), count: capacity)
+    guard sysctl(&mib, u_int(mib.count), &processes, &size, nil, 0) == 0 else { return [] }
+    let count = size / MemoryLayout<kinfo_proc>.stride
+
+    var childrenByParent: [pid_t: [pid_t]] = [:]
+    for index in 0..<count {
+        let process = processes[index]
+        let parent = process.kp_eproc.e_ppid
+        let child = process.kp_proc.p_pid
+        guard parent > 0, child > 0 else { continue }
+        childrenByParent[parent, default: []].append(child)
+    }
+
+    var result: [pid_t] = []
+    var queue = childrenByParent[pid] ?? []
+    while let child = queue.popLast() {
+        result.append(child)
+        queue.append(contentsOf: childrenByParent[child] ?? [])
+    }
+    return result
+}
+
+func forceTerminate(processIDs: [pid_t]) {
+    let ownPID = getpid()
+    for processID in processIDs where processID > 0 && processID != ownPID {
+        kill(processID, SIGKILL)
+    }
+}
+
+// MARK: - Dock "Running in Background" state
+//
+// macOS 26 and later can keep an app's Dock tile after its processes are gone,
+// labelled "Running in Background". Killing the process does not clear that
+// state; the Dock's own "Stop Running in Background" command does. Drive that
+// command through Accessibility so a quit really makes the icon disappear.
+
+func dockApplicationElement() -> AXUIElement? {
+    guard let dock = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first else {
+        return nil
+    }
+    return AXUIElementCreateApplication(dock.processIdentifier)
+}
+
+func findDockItem(in element: AXUIElement, name: String, url: URL?, matchURL: Bool) -> AXUIElement? {
+    if axAttribute(element, kAXRoleAttribute) as? String == "AXDockItem" {
+        if matchURL, let url {
+            let rawURL = axAttribute(element, "AXURL")
+            let itemURL = (rawURL as? URL) ?? (rawURL as? String).flatMap(URL.init(string:))
+            if let itemURL, normalizedBundlePath(itemURL) == normalizedBundlePath(url) {
+                return element
+            }
+        } else if axAttribute(element, kAXTitleAttribute) as? String == name {
+            return element
         }
     }
+    guard let children = axAttribute(element, kAXChildrenAttribute) as? [AXUIElement] else { return nil }
+    for child in children {
+        if let match = findDockItem(in: child, name: name, url: url, matchURL: matchURL) {
+            return match
+        }
+    }
+    return nil
+}
+
+func dockItemElement(named name: String, url: URL?) -> AXUIElement? {
+    guard let dock = dockApplicationElement() else { return nil }
+    // The bundle path is stable even when the Dock title differs from the app
+    // name; fall back to the visible title when the URL is unavailable.
+    if url != nil, let match = findDockItem(in: dock, name: name, url: url, matchURL: true) {
+        return match
+    }
+    return findDockItem(in: dock, name: name, url: url, matchURL: false)
+}
+
+/// The Dock reports 1 while any part of the app is still alive, including a
+/// helper that keeps the tile labelled "Running in Background". A pinned app
+/// that is fully quit reports 0.
+func dockItemIsRunning(_ item: AXUIElement) -> Bool {
+    guard let number = axAttribute(item, "AXIsApplicationRunning") as? NSNumber else { return true }
+    return number.boolValue
+}
+
+func localizedDockMenuTitle(_ key: String, fallback: String) -> String {
+    let dock = Bundle(path: "/System/Library/CoreServices/Dock.app")
+    let title = dock?.localizedString(forKey: key, value: nil, table: "DockMenus") ?? key
+    return title == key ? fallback : title
+}
+
+func findMenuItem(in element: AXUIElement, titled title: String) -> AXUIElement? {
+    if axAttribute(element, kAXRoleAttribute) as? String == "AXMenuItem",
+       axAttribute(element, kAXTitleAttribute) as? String == title {
+        return element
+    }
+    guard let children = axAttribute(element, kAXChildrenAttribute) as? [AXUIElement] else { return nil }
+    for child in children {
+        if let match = findMenuItem(in: child, titled: title) { return match }
+    }
+    return nil
+}
+
+var backgroundStopInProgress = false
+
+func stopRunningInBackground(named name: String, url: URL?, attempts: Int = 3) {
+    guard !backgroundStopInProgress else { return }
+    backgroundStopInProgress = true
+    attemptStopRunningInBackground(named: name, url: url, attempt: 0, attempts: attempts) {
+        backgroundStopInProgress = false
+    }
+}
+
+func attemptStopRunningInBackground(named name: String, url: URL?, attempt: Int, attempts: Int, completion: @escaping () -> Void) {
+    // The Dock needs a moment to register the background activity after the
+    // processes exit, so retry a few times before giving up.
+    guard attempt < attempts else {
+        print("[UXTapFix] Dock has no background activity to stop for '\(name)'.")
+        completion()
+        return
+    }
+
+    guard let item = dockItemElement(named: name, url: url) else {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            attemptStopRunningInBackground(named: name, url: url, attempt: attempt + 1, attempts: attempts, completion: completion)
+        }
+        return
+    }
+
+    // Do not flash a normal app's context menu: it has no background command.
+    guard dockItemIsRunning(item) else {
+        completion()
+        return
+    }
+
+    func retry() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            attemptStopRunningInBackground(named: name, url: url, attempt: attempt + 1, attempts: attempts, completion: completion)
+        }
+    }
+
+    guard AXUIElementPerformAction(item, kAXShowMenuAction as CFString) == .success else {
+        retry()
+        return
+    }
+
+    waitForDockMenu(of: item, named: name, url: url, attempt: attempt, attempts: attempts, pollsLeft: 20, completion: completion)
+}
+
+func waitForDockMenu(of item: AXUIElement, named name: String, url: URL?, attempt: Int, attempts: Int, pollsLeft: Int, completion: @escaping () -> Void) {
+    guard pollsLeft > 0 else {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            attemptStopRunningInBackground(named: name, url: url, attempt: attempt + 1, attempts: attempts, completion: completion)
+        }
+        return
+    }
+
+    if let shownAttribute = axAttribute(item, "AXShownMenuUIElement") {
+        let shown = shownAttribute as! AXUIElement
+        let title = localizedDockMenuTitle("STOP_RUNNING_IN_BACKGROUND", fallback: "Stop Running in Background")
+        if let menuItem = findMenuItem(in: shown, titled: title) {
+            let result = AXUIElementPerformAction(menuItem, kAXPressAction as CFString)
+            if result == .success {
+                print("[UXTapFix] Stopped '\(name)' running in the background.")
+            } else {
+                print("[UXTapFix] Could not stop '\(name)' in the background (AX error \(result.rawValue)).")
+            }
+            completion()
+        } else {
+            _ = AXUIElementPerformAction(shown, kAXCancelAction as CFString)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                attemptStopRunningInBackground(named: name, url: url, attempt: attempt + 1, attempts: attempts, completion: completion)
+            }
+        }
+        return
+    }
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) {
+        waitForDockMenu(of: item, named: name, url: url, attempt: attempt, attempts: attempts, pollsLeft: pollsLeft - 1, completion: completion)
+    }
+}
+
+/// Waits for the quit to finish, then clears the Dock's background state. The
+/// Dock tile is what the user sees, so it must go even when every process is
+/// already gone. A pinned app that is fully closed reports `isRunning == 0`,
+/// so its ordinary tile is left alone.
+func clearBackgroundActivity(after apps: [NSRunningApplication], named name: String, url: URL?) {
+    let deadline = Date().addingTimeInterval(2.5)
+    func poll() {
+        let stillRunning = runningApp(named: name, url: url)
+        if stillRunning == nil && apps.allSatisfy({ $0.isTerminated }) {
+            stopRunningInBackground(named: name, url: url)
+        } else if Date() >= deadline {
+            print("[UXTapFix] '\(name)' is still running; not touching its Dock tile.")
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: poll)
+        }
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: poll)
+}
+
+/// Gives a normal quit 1.2 s to finish, then force-quits whatever is left.
+/// Plain child processes are killed too; otherwise they keep the Dock tile
+/// labelled "Running in Background" long after the app itself is gone.
+func finishQuit(
+    app: NSRunningApplication,
+    helpers: [NSRunningApplication],
+    descendants: [pid_t],
+    named name: String,
+    url: URL?,
+    force: Bool
+) {
+    let deadline = force ? Date() : Date().addingTimeInterval(1.2)
+
+    func settle() {
+        let allTerminated = app.isTerminated && helpers.allSatisfy { $0.isTerminated }
+        if allTerminated || Date() >= deadline {
+            if !app.isTerminated {
+                if !force {
+                    print("[UXTapFix] '\(name)' ignored the quit; forcing it now.")
+                }
+                app.forceTerminate()
+            }
+            for helper in helpers where !helper.isTerminated {
+                helper.forceTerminate()
+            }
+            forceTerminate(processIDs: descendants)
+            clearBackgroundActivity(after: [app] + helpers, named: name, url: url)
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: settle)
+        }
+    }
+    settle()
 }
 
 func quitApp(named name: String, url: URL? = nil, mode: QuitMode = .normal) {
@@ -614,66 +846,47 @@ func quitApp(named name: String, url: URL? = nil, mode: QuitMode = .normal) {
         print("[UXTapFix] Ignoring blacklisted '\(name)'")
         return
     }
-    let apps = NSWorkspace.shared.runningApplications
     if let app = runningApp(named: name, url: url) {
         lastQuitName = name
         lastQuitAt = Date().timeIntervalSince1970
         writeStatus()
+
+        let helpers = backgroundHelpers(of: app)
+        let descendants = descendantProcessIDs(of: app.processIdentifier)
+
         switch mode {
         case .normal:
-            print("[UXTapFix] Quitting '\(name)' pid \(app.processIdentifier)")
-            if !app.terminate() {
-                print("[UXTapFix] terminate() false, retry forceTerminate in 1.2s")
-                scheduleForceTerminate([app], after: 1.2)
-            }
-        case .background:
-            let helpers = backgroundHelpers(of: app)
             print("[UXTapFix] Quitting '\(name)' pid \(app.processIdentifier) and \(helpers.count) background process(es)")
             _ = app.terminate()
             for helper in helpers { _ = helper.terminate() }
-            scheduleForceTerminate([app] + helpers, after: 1.2)
+            finishQuit(app: app, helpers: helpers, descendants: descendants, named: name, url: url, force: false)
         case .force:
-            let helpers = backgroundHelpers(of: app)
             print("[UXTapFix] Force quitting '\(name)' pid \(app.processIdentifier) and \(helpers.count) background process(es)")
             app.forceTerminate()
             for helper in helpers { helper.forceTerminate() }
+            finishQuit(app: app, helpers: helpers, descendants: descendants, named: name, url: url, force: true)
         }
         return
     }
-    if case .force = mode {
-        print("[UXTapFix] No running app for '\(name)' to force quit")
-        return
-    }
-    print("[UXTapFix] No NSRunningApp for '\(name)', trying AppleScript")
-    lastQuitName = name
-    lastQuitAt = Date().timeIntervalSince1970
-    writeStatus()
-    let src = "tell application \"\(name)\" to quit"
-    var err: NSDictionary?
-    if let sc = NSAppleScript(source: src) {
-        sc.executeAndReturnError(&err)
-        if let e = err { print("[UXTapFix] AppleScript error \(e)") }
-        else { print("[UXTapFix] AppleScript quit sent to '\(name)'") }
-    }
-    if let byBundle = apps.first(where: { ($0.bundleIdentifier ?? "").lowercased().contains(name.lowercased()) }) {
-        print("[UXTapFix] Fuzzy bundle match \(String(describing: byBundle.bundleIdentifier)) -> terminate")
-        _ = byBundle.terminate()
-    }
+
+    print("[UXTapFix] No running app for '\(name)'")
+    // The app may already be gone while macOS still shows its tile as "Running
+    // in Background". A click on that tile should clear exactly that state.
+    clearBackgroundActivity(after: [], named: name, url: url)
 }
 
 // MARK: - Event handling (shared)
 
-// Repeated middle-clicks on one Dock icon escalate: 1 = quit, 2 = quit the
-// app and its helpers, 3 = force quit. Clicks are counted while each follows
-// the previous one within the double-click window, so a single click keeps its
-// usual meaning.
+// One middle-click quits; three force-quit. A second click is only part of
+// the sequence and performs the same normal quit. Clicks are counted while
+// each follows the previous one within the double-click window.
 let multiClickEnabled: Bool = UserDefaults.standard.object(forKey: "middleClickMultiAction") == nil
     ? true
     : UserDefaults.standard.bool(forKey: "middleClickMultiAction")
 // Match the system's double-click speed so deliberate triple-clicks with a
 // real mouse count too. Three-finger taps are faster, but physical
-// middle-clicks commonly land 300–500 ms apart, and the old fixed 300 ms
-// window let the first click quit the app before the second arrived.
+// middle-clicks commonly land 300–500 ms apart, and a fixed 300 ms window
+// would fire the normal quit before the third click arrived.
 let multiClickWindow: TimeInterval = {
     if UserDefaults.standard.object(forKey: "middleClickMultiClickWindow") != nil {
         return max(0.15, UserDefaults.standard.double(forKey: "middleClickMultiClickWindow") / 1000)
@@ -711,11 +924,13 @@ func registerDockMiddleClick(appName: String, url: URL?) {
         return
     }
 
+    // One click and two clicks both mean "quit normally". The wait only exists
+    // so a third click can still arrive and turn it into a force quit.
     let work = DispatchWorkItem {
         pendingDockClickWorkItem = nil
         pendingDockClickName = nil
         pendingDockClickCount = 0
-        quitApp(named: appName, url: url, mode: count == 1 ? .normal : .background)
+        quitApp(named: appName, url: url, mode: .normal)
     }
     pendingDockClickWorkItem = work
     DispatchQueue.main.asyncAfter(deadline: .now() + multiClickWindow, execute: work)

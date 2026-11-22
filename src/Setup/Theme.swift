@@ -111,7 +111,7 @@ struct IconTile: View {
 struct StepProgress: View {
     let current: Int
 
-    private let steps = ["Install", "Permissions & Login", "Try"]
+    private let steps = ["Install", "Permissions & Login", "Finish"]
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {

@@ -256,7 +256,7 @@ struct PermissionsView: View {
                     StepHeader(
                         step: 1,
                         title: "Permissions & Login",
-                        subtitle: "macOS asks for Accessibility before UXTapFix can see Dock clicks. Input Monitoring comes with it."
+                        subtitle: "macOS asks for Accessibility before UXTapFix can see Dock clicks."
                     )
 
                     if model.launchAtLogin && !model.serviceRunning {
@@ -268,33 +268,13 @@ struct PermissionsView: View {
                         )
                     }
 
-                    if let info = model.infoMessage {
-                        Notice(text: info)
-                    }
-
                     SetupCard(padding: SetupStyle.cardPadding) {
-                        VStack(spacing: 0) {
-                            PermissionRow(
-                                kind: .accessibility,
-                                granted: model.accessibilityGranted,
-                                waiting: model.requestedPermission == .accessibility,
-                                onGrant: { model.requestPermission(.accessibility) }
-                            )
-
-                            Divider()
-                                .padding(.leading, SetupStyle.tileSize + SetupStyle.itemSpacing)
-
-                            PermissionRow(
-                                kind: .inputMonitoring,
-                                granted: model.inputMonitoringGranted,
-                                waiting: false,
-                                note: model.accessibilityGranted
-                                    ? "Included with Accessibility — no separate switch is needed."
-                                    : "Grant Accessibility above; macOS includes Input Monitoring with it.",
-                                showsAction: false,
-                                onGrant: {}
-                            )
-                        }
+                        PermissionRow(
+                            kind: .accessibility,
+                            granted: model.accessibilityGranted,
+                            waiting: model.requestedPermission == .accessibility,
+                            onGrant: { model.requestPermission(.accessibility) }
+                        )
                     }
 
                     SetupCard(padding: SetupStyle.cardPadding) {
@@ -364,8 +344,6 @@ struct PermissionRow: View {
     let kind: SetupModel.PermissionKind
     let granted: Bool
     let waiting: Bool
-    var note: String?
-    var showsAction = true
     let onGrant: () -> Void
 
     private var statusKind: StatusPill.Kind {
@@ -390,13 +368,6 @@ struct PermissionRow: View {
                     .font(SetupFont.body)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-
-                if let note {
-                    Text(note)
-                        .font(SetupFont.caption)
-                        .foregroundStyle(.tertiary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
             }
 
             Spacer(minLength: 12)
@@ -404,7 +375,7 @@ struct PermissionRow: View {
             VStack(alignment: .trailing, spacing: 8) {
                 StatusPill(text: statusText, kind: statusKind)
 
-                if !granted && showsAction {
+                if !granted {
                     Button(action: onGrant) {
                         HStack(spacing: 6) {
                             Image(systemName: waiting ? "clock" : "arrow.up.forward.app")
@@ -432,8 +403,8 @@ struct FinishView: View {
                 VStack(alignment: .leading, spacing: SetupStyle.sectionSpacing) {
                     StepHeader(
                         step: 2,
-                        title: "Try",
-                        subtitle: "Everything is set up. Try the gestures below, then click Try to close Setup."
+                        title: "Finish",
+                        subtitle: "Everything is set up. Try the gestures below, then click Finish to close Setup."
                     )
 
                     if !model.accessibilityGranted {
@@ -473,9 +444,8 @@ struct FinishView: View {
                             VStack(alignment: .leading, spacing: 10) {
                                 TipRow(symbol: "macwindow", text: "Tap a browser tab with three fingers to close it.")
                                 TipRow(symbol: "link", text: "Tap a link with three fingers to open it in a new tab.")
-                                TipRow(symbol: "square.grid.2x2", text: "Middle-click a Dock icon to quit the app.")
-                                TipRow(symbol: "bolt", text: "Click again to quit the app's background helpers too.")
-                                TipRow(symbol: "bolt.fill", text: "Click a third time to force quit immediately.")
+                                TipRow(symbol: "square.grid.2x2", text: "Middle-click or 3-finger tap a Dock icon to quit the app.")
+                                TipRow(symbol: "bolt.fill", text: "Triple-click/tap to force quit immediately.")
                                 TipRow(symbol: "terminal", text: "Middle-click in Terminal to paste the selection.")
                             }
                         }
@@ -515,7 +485,7 @@ struct FinishView: View {
                 Button {
                     model.goNext()
                 } label: {
-                    ActionLabel(title: "Try", systemName: "checkmark", iconAfter: true)
+                    ActionLabel(title: "Finish", systemName: "checkmark", iconAfter: true)
                 }
                 .buttonStyle(SetupButtonStyle(prominent: true))
                 .keyboardShortcut(.defaultAction)

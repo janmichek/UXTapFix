@@ -26,7 +26,7 @@ enum FeaturePreviewKind: String, CaseIterable, Identifiable {
         case .quitDockApp:
             return "Middle-click or 3-finger tap a Dock icon to quit the app."
         case .multiAction:
-            return "Click twice to stop running in the background, three times to force quit."
+            return "Click/tap once to quit, or three times to force quit."
         }
     }
 
@@ -376,13 +376,14 @@ private struct MiddleMouseGlyph: View {
         // wheel's bottom edge so resizing the wheel can never leave the line
         // showing through it.
         let dividerY = wheelTop + wheelHeight + max(bodyHeight * 0.06, 2)
+        let outline = Color.primary.opacity(0.32)
 
         ZStack(alignment: .top) {
             RoundedRectangle(cornerRadius: bodyWidth * 0.5, style: .continuous)
                 .fill(SetupColors.card)
                 .overlay(
                     RoundedRectangle(cornerRadius: bodyWidth * 0.5, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.32), lineWidth: 1)
+                        .strokeBorder(outline, lineWidth: 1)
                 )
                 .frame(width: bodyWidth, height: bodyHeight)
 
@@ -392,7 +393,7 @@ private struct MiddleMouseGlyph: View {
                 .offset(y: dividerY)
 
             Capsule()
-                .fill(active ? SetupColors.accent : Color.primary.opacity(0.40))
+                .fill(active ? SetupColors.accent : outline)
                 .frame(width: max(size * 0.11, 3.5), height: wheelHeight)
                 .offset(y: wheelTop)
         }
@@ -464,30 +465,33 @@ private struct TrackpadTapScene: View {
 
 // MARK: - Multi-action preview
 
-/// Repeated middle-clicks on one Dock icon escalate: quit, stop+force, force quit.
+/// A normal middle-click quits; a triple-click force-quits.
 private struct EscalationScene: View {
     let size: CGSize
     let date: Date
 
-    private let clickTimes: [TimeInterval] = [1.5, 3.3, 5.1]
+    private let clickTimes: [TimeInterval] = [1.5, 4.5]
     private let stepLabels = [
         "Quit",
-        "Stop helpers",
         "Force quit now"
+    ]
+    private let stepCounts = [
+        "1×",
+        "3×"
     ]
 
     var body: some View {
         let elapsed = date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: FeatureAnimationClock.loop)
         let firedCount = clickTimes.filter { elapsed >= $0 }.count
-        let active = firedCount > 0 ? min(firedCount - 1, 2) : nil
+        let active = firedCount > 0 ? min(firedCount - 1, 1) : nil
 
         VStack(spacing: 6) {
-            ForEach(0..<3, id: \.self) { index in
+            ForEach(0..<clickTimes.count, id: \.self) { index in
                 let fired = elapsed >= clickTimes[index]
                 let isActive = active == index
 
                 HStack(spacing: 9) {
-                    Text("\(index + 1)×")
+                    Text(stepCounts[index])
                         .font(.system(size: 10.5, weight: .bold))
                         .foregroundStyle(isActive ? SetupColors.accent : Color.secondary)
                         .frame(width: 20, alignment: .trailing)

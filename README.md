@@ -52,8 +52,8 @@ and opens the same assistant.
 The assistant is a three-step native SwiftUI app:
 
 1. **Welcome** — animated previews of three features (a three-finger trackpad
-   tap synced to a middle click, quitting a Dock app, and the quit → stop →
-   force-quit escalation) plus a short summary. Click **Install** to copy
+   tap synced to a middle click, quitting a Dock app, and a triple-click
+   force quit) plus a short summary. Click **Install** to copy
    `UXTapFix.app` to `~/Applications` and add a per-user LaunchAgent. No
    admin rights, no system-wide changes.
 2. **Permissions & Login** — opens the exact macOS privacy panes and shows

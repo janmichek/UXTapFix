@@ -638,6 +638,17 @@ func forceTerminate(processIDs: [pid_t]) {
     }
 }
 
+/// `isTerminated` can lag the actual exit. A dead pid is gone; EPERM means the
+/// process still exists and belongs to someone else, so it is not treated as exited.
+func hasExited(_ app: NSRunningApplication) -> Bool {
+    if app.isTerminated { return true }
+    let pid = app.processIdentifier
+    guard pid > 0 else { return true }
+    errno = 0
+    if kill(pid, 0) == 0 { return false }
+    return errno != EPERM
+}
+
 // MARK: - Dock "Running in Background" state
 //
 // macOS 26 and later can keep an app's Dock tile after its processes are gone,
@@ -710,12 +721,43 @@ func findMenuItem(in element: AXUIElement, titled title: String) -> AXUIElement?
 }
 
 var backgroundStopInProgress = false
+var backgroundStopCurrent: (name: String, url: URL?)?
+var backgroundStopQueue: [(name: String, url: URL?)] = []
 
 func stopRunningInBackground(named name: String, url: URL?, attempts: Int = 3) {
-    guard !backgroundStopInProgress else { return }
+    let sameAsCurrent = backgroundStopCurrent.map { current in
+        current.name == name && sameDockTarget(current.url, url)
+    } ?? false
+    let alreadyQueued = backgroundStopQueue.contains { queued in
+        queued.name == name && sameDockTarget(queued.url, url)
+    }
+    // A second app quit while the Dock menu is open used to be ignored, so
+    // its "Running in Background" tile stayed. Queue it and run it next.
+    guard !sameAsCurrent, !alreadyQueued else { return }
+    backgroundStopQueue.append((name: name, url: url))
+    drainBackgroundStopQueue(attempts: attempts)
+}
+
+func sameDockTarget(_ lhs: URL?, _ rhs: URL?) -> Bool {
+    switch (lhs, rhs) {
+    case (nil, nil):
+        return true
+    case let (lhs?, rhs?):
+        return normalizedBundlePath(lhs) == normalizedBundlePath(rhs)
+    default:
+        return false
+    }
+}
+
+func drainBackgroundStopQueue(attempts: Int) {
+    guard !backgroundStopInProgress, !backgroundStopQueue.isEmpty else { return }
+    let next = backgroundStopQueue.removeFirst()
     backgroundStopInProgress = true
-    attemptStopRunningInBackground(named: name, url: url, attempt: 0, attempts: attempts) {
+    backgroundStopCurrent = next
+    attemptStopRunningInBackground(named: next.name, url: next.url, attempt: 0, attempts: attempts) {
         backgroundStopInProgress = false
+        backgroundStopCurrent = nil
+        drainBackgroundStopQueue(attempts: attempts)
     }
 }
 
@@ -796,7 +838,7 @@ func clearBackgroundActivity(after apps: [NSRunningApplication], named name: Str
     let deadline = Date().addingTimeInterval(2.5)
     func poll() {
         let stillRunning = runningApp(named: name, url: url)
-        if stillRunning == nil && apps.allSatisfy({ $0.isTerminated }) {
+        if stillRunning == nil && apps.allSatisfy(hasExited) {
             stopRunningInBackground(named: name, url: url)
         } else if Date() >= deadline {
             print("[UXTapFix] '\(name)' is still running; not touching its Dock tile.")
@@ -811,6 +853,8 @@ func clearBackgroundActivity(after apps: [NSRunningApplication], named name: Str
 /// a save sheet or finish its own shutdown. Once every process has exited we
 /// clear a lingering "Running in Background" Dock tile. Force quit is only used
 /// when the user explicitly asks for it with a triple-click.
+var normalQuitWaits: [pid_t: Int] = [:]
+
 func finishQuit(
     app: NSRunningApplication,
     helpers: [NSRunningApplication],
@@ -819,9 +863,12 @@ func finishQuit(
     url: URL?,
     force: Bool
 ) {
+    let pid = app.processIdentifier
     if force {
-        if !app.isTerminated { app.forceTerminate() }
-        for helper in helpers where !helper.isTerminated {
+        // Drop a normal-quit waiter so it cannot keep polling after this.
+        normalQuitWaits[pid] = nil
+        if !hasExited(app) { app.forceTerminate() }
+        for helper in helpers where !hasExited(helper) {
             helper.forceTerminate()
         }
         forceTerminate(processIDs: descendants)
@@ -829,9 +876,15 @@ func finishQuit(
         return
     }
 
+    normalQuitWaits[pid, default: 0] += 1
+    let generation = normalQuitWaits[pid] ?? 0
+
     func waitForExit() {
-        let allTerminated = app.isTerminated && helpers.allSatisfy { $0.isTerminated }
+        // A newer normal quit, or a force quit, owns this app now.
+        guard normalQuitWaits[pid] == generation else { return }
+        let allTerminated = hasExited(app) && helpers.allSatisfy(hasExited)
         if allTerminated {
+            normalQuitWaits[pid] = nil
             clearBackgroundActivity(after: [app] + helpers, named: name, url: url)
         } else {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: waitForExit)
@@ -895,6 +948,7 @@ let multiClickWindow: TimeInterval = {
 
 var pendingDockClickCount = 0
 var pendingDockClickName: String?
+var pendingDockClickURL: URL?
 var pendingDockClickWorkItem: DispatchWorkItem?
 
 func registerDockMiddleClick(appName: String, url: URL?) {
@@ -903,9 +957,14 @@ func registerDockMiddleClick(appName: String, url: URL?) {
         return
     }
     if pendingDockClickName != appName {
+        // The window only exists so more clicks on this same icon can arrive.
+        // A click on a different icon used to cancel the previous quit and
+        // never run it.
+        commitPendingDockClick()
         pendingDockClickName = appName
         pendingDockClickCount = 0
     }
+    pendingDockClickURL = url
     pendingDockClickCount = min(pendingDockClickCount + 1, 3)
     let count = pendingDockClickCount
     print("[UXTapFix] Dock middle-click \(count) on '\(appName)'")
@@ -918,6 +977,7 @@ func registerDockMiddleClick(appName: String, url: URL?) {
     // postpone the force quit indefinitely.
     if count >= 3 {
         pendingDockClickName = nil
+        pendingDockClickURL = nil
         pendingDockClickCount = 0
         quitApp(named: appName, url: url, mode: .force)
         return
@@ -926,13 +986,21 @@ func registerDockMiddleClick(appName: String, url: URL?) {
     // One click and two clicks both mean "quit normally". The wait only exists
     // so a third click can still arrive and turn it into a force quit.
     let work = DispatchWorkItem {
-        pendingDockClickWorkItem = nil
-        pendingDockClickName = nil
-        pendingDockClickCount = 0
-        quitApp(named: appName, url: url, mode: .normal)
+        commitPendingDockClick()
     }
     pendingDockClickWorkItem = work
     DispatchQueue.main.asyncAfter(deadline: .now() + multiClickWindow, execute: work)
+}
+
+func commitPendingDockClick() {
+    pendingDockClickWorkItem?.cancel()
+    pendingDockClickWorkItem = nil
+    guard let name = pendingDockClickName else { return }
+    let url = pendingDockClickURL
+    pendingDockClickName = nil
+    pendingDockClickURL = nil
+    pendingDockClickCount = 0
+    quitApp(named: name, url: url, mode: .normal)
 }
 
 // MARK: - CGEventTap (can swallow)

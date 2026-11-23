@@ -130,6 +130,9 @@ struct WelcomeHero: View {
 
 struct FeaturePreviewCard: View {
     let kind: FeaturePreviewKind
+    /// When set, the card renders this moment instead of animating. Used by
+    /// `tools/export-previews.swift` to record the README previews.
+    var date: Date? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -140,7 +143,7 @@ struct FeaturePreviewCard: View {
                 Spacer(minLength: 0)
             }
 
-            FeatureAnimationStage(kind: kind)
+            FeatureAnimationStage(kind: kind, date: date)
                 .frame(height: SetupStyle.previewStageHeight)
                 .frame(maxWidth: .infinity)
                 .background(
@@ -176,6 +179,8 @@ struct FeaturePreviewCard: View {
 
 struct FeatureAnimationStage: View {
     let kind: FeaturePreviewKind
+    /// A fixed moment for offscreen rendering; `nil` follows the live clock.
+    var date: Date? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -185,6 +190,8 @@ struct FeatureAnimationStage: View {
             if reduceMotion {
                 FeatureStillStage(kind: kind)
                     .frame(width: size.width, height: size.height)
+            } else if let date {
+                scene(size: size, date: date)
             } else {
                 TimelineView(.animation) { context in
                     scene(size: size, date: context.date)

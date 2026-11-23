@@ -2,6 +2,12 @@
 
 A three-finger tap that closes tabs, opens links, and quits Dock apps.
 
+<p align="center">
+  <img src="assets/previews/three-finger-tap.gif" width="254" alt="A three-finger tap and a middle click light up as the same action">
+  <img src="assets/previews/quit-dock-app.gif" width="254" alt="A three-finger tap on a Dock icon quits the app">
+  <img src="assets/previews/multi-action.gif" width="254" alt="One click quits, three clicks force quit">
+</p>
+
 - Close tabs and open links in a new tab with a 3-finger tap.
 - Tap a Dock icon with three fingers to quit the app.
 - Click or tap once to quit, or three times to force quit.
@@ -113,5 +119,11 @@ If a click does nothing, check the log, grant Accessibility, and run `restart.sh
 The smoke test checks syntax, type-checks and builds both apps, verifies signatures, and asserts `MultitouchSupport` is weak-linked.
 
 The daemon is `src/UXTapFix.swift` plus a header in `src/MultitouchSupport/`. Setup is SwiftUI in `src/Setup/`. `build.sh` compiles with `swiftc` and ad-hoc signs both apps. There is no Xcode project.
+
+The three previews at the top of this file are rendered from the Welcome screen's SwiftUI cards. Regenerate them after changing those animations (`ffmpeg` required):
+
+```sh
+./tools/export-previews.sh
+```
 
 A `CGEventTap` catches middle click (button 2) and swallows it over the Dock. `MultitouchSupport` turns a short three-finger tap, or a click with three fingers down, into that same click. Accessibility resolves the `AXDockItem` under the pointer. One click calls `terminate()`; three calls `forceTerminate()`. If the tap cannot be created, an `NSEvent` monitor is the fallback. UXTapFix posts the click; the app under the pointer decides what it means.

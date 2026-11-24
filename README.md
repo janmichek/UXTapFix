@@ -1,6 +1,6 @@
 # UXTapFix
 
-A three-finger tap that closes tabs, opens links, and quits Dock apps.
+Improve missing UX on your MacBook. A three-finger tap that closes tabs, opens links, and quits Dock apps.
 
 <p align="center">
   <img src="assets/previews/three-finger-tap.gif" width="254" alt="A three-finger tap and a middle click light up as the same action">

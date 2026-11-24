@@ -18,9 +18,11 @@ Improve missing UX on your MacBook. This was never finished feature and always o
 
 ## Install
 
-Download the instaler from latest [release]([url](https://github.com/janmichek/UXTapFix/releases/)) . Continue with helpful installer setup.
+Download the installer from latest [release](https://github.com/janmichek/UXTapFix/releases/). Continue with helpful installer setup.
 
 Setup installs a small background service in your user folder and helps you grant the permissions macOS requires. No admin password, and it never phones home. Requires **macOS 13** or later.
+
+**Possible conflicts:** if macOS opens Look Up on a three-finger tap, set **System Settings → Trackpad → Point & Click → Look up & data detectors** to *Force Click with one finger*.
 
 The trackpad gesture uses Apple's private `MultitouchSupport.framework` (weak-linked, not App Store compatible). A real middle-click mouse still quits Dock apps if that framework is missing.
 

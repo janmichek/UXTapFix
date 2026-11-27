@@ -1,6 +1,6 @@
 # UXTapFix
 
-Improve missing UX on your MacBook. This was never finished feature and always overlooked. A three-finger trackpad tap that closes tabs, opens links, and quits Dock apps.
+Improve missing UX on your MacBook. This was never finished feature and always overlooked. A three-finger trackpad tap that closes tabs, opens links, quits Dock apps, closes windows in Mission Control, and deletes Calendar events.
 
 <p align="center">
   <img src="assets/previews/three-finger-tap.gif" width="254" alt="A three-finger tap and a middle click light up as the same action">
@@ -12,9 +12,13 @@ Improve missing UX on your MacBook. This was never finished feature and always o
 ## Gestures
 
 - Close tabs and open links in a new tab with a 3-finger tap / middle click.
+- Close the window under the pointer in Mission Control or App Exposé with a 3-finger tap / middle click.
+- Delete the Calendar event under the pointer with a 3-finger tap / middle click.
 - Quit app from Dock with 3-finger tap / middle click.
 - Force quit app from Dock with 3x 3-finger tap / middle click.
 - Paste text in Terminal with 3-finger tap
+
+Calendar deletion takes effect immediately. macOS still asks before removing a recurring event.
 
 ## Install
 
@@ -28,4 +32,4 @@ The trackpad gesture uses Apple's private `MultitouchSupport.framework` (weak-li
 
 ## Permissions
 
-**Accessibility** is required. It lets UXTapFix see which Dock icon is under the pointer and create the event tap. macOS requires you to flip the switch yourself. After you do, Setup restarts the service; the daemon also retries the tap on its own.
+**Accessibility** is required. It lets UXTapFix see the Dock icon, Mission Control window, or Calendar event under the pointer, and create the event tap. macOS requires you to flip the switch yourself. After you do, Setup restarts the service; the daemon also retries the tap on its own.

@@ -658,6 +658,8 @@ struct FinishView: View {
 
                             VStack(alignment: .leading, spacing: 10) {
                                 TipRow(symbol: "macwindow", text: "Tap a browser tab with three fingers to close it.")
+                                TipRow(symbol: "macwindow.on.rectangle", text: "Tap a window in Mission Control with three fingers to close it.")
+                                TipRow(symbol: "calendar", text: "Tap a Calendar event with three fingers to delete it.")
                                 TipRow(symbol: "link", text: "Tap a link with three fingers to open it in a new tab.")
                                 TipRow(symbol: "square.grid.2x2", text: "Tap a Dock icon with three fingers to quit the app.")
                                 TipRow(symbol: "bolt.fill", text: "Triple-click/tap to force quit immediately.")

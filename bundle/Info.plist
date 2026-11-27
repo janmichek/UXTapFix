@@ -25,6 +25,6 @@
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSAccessibilityUsageDescription</key>
-    <string>Needed to detect the Dock icon under the cursor.</string>
+    <string>Needed to see the Dock icon or Mission Control window under the pointer.</string>
 </dict>
 </plist>

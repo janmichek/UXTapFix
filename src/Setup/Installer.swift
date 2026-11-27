@@ -103,7 +103,7 @@ final class SetupModel: ObservableObject {
 
         var icon: String { "accessibility" }
 
-        var summary: String { "Identify the Dock icon under the pointer." }
+        var summary: String { "See the Dock icon, Mission Control window, or Calendar event under the pointer." }
     }
 
     struct InstallerError: LocalizedError {

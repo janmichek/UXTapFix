@@ -87,7 +87,7 @@ struct FeatureAnimationClock {
 // MARK: - Welcome hero
 
 struct WelcomeHero: View {
-    private let subtitle = "Close tabs, open links, and quit Dock apps with a three-finger tap."
+    private let subtitle = "Close tabs, open links, quit Dock apps, close Mission Control windows, and delete Calendar events with a three-finger tap."
 
     var body: some View {
         HStack(spacing: 14) {

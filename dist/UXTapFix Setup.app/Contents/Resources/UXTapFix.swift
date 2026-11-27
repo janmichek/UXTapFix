@@ -1,7 +1,9 @@
 // UXTapFix v2.4
 // Middle-click (button 2) a Dock icon to quit that app.
 // Also turns a three-finger trackpad tap/click into a middle click, so the
-// same gesture closes a browser tab outside the Dock.
+// same gesture closes a browser tab outside the Dock, closes the window under
+// the pointer in Mission Control and App Exposé, and deletes the Calendar
+// event under the pointer.
 // Supports CGEventTap (swallows the click) with an NSEvent global monitor fallback.
 //
 // The Setup app asks this binary to request TCC permissions and reads status.json
@@ -44,6 +46,8 @@ var reportedStatusWriteFailure = false
 //   middleClickMultiClickWindow Double  default: system double-click interval
 //                                       (minimum 500 milliseconds, can be overridden; floor 150)
 //   middleClickAllowFinderQuit  Bool    default false
+//   middleClickCloseOverview    Bool    default true
+//   middleClickRemoveCalendarEvent Bool default true
 
 @_silgen_name("MTDeviceCreateList")
 private func MTDeviceCreateList() -> Unmanaged<CFMutableArray>?
@@ -457,12 +461,14 @@ func writeStatus() {
 
 func startStatusHeartbeat() {
     writeStatus()
+    refreshOverviewHosts()
     var tick = 0
     _ = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
         // Permissions granted while this process is running are cached by
         // TCC. Retry the tap every few seconds; once it is installed there is
         // no more work to do.
         tick += 1
+        refreshOverviewHosts()
         if tick % 3 == 0 {
             retryEventTapIfNeeded()
         }
@@ -1005,6 +1011,659 @@ func quitApp(_ target: DockItem, mode: QuitMode = .normal) {
     clearBackgroundActivity(after: [], target: target)
 }
 
+// MARK: - Mission Control / App Exposé
+
+// One middle-click on a window thumbnail closes that window and leaves the
+// overview up, the same way a middle-click closes a browser tab.
+//
+// The thumbnail layout is unpublished. Through macOS 26 the Dock exposes it as
+// `mc` → `mc.display` → `mc.windows` (and `appexpose` for App Exposé). On
+// macOS 27 it moved to WindowManager: `mc.display` / `appexpose.display` hold
+// the window buttons directly, and each button's `wid` is the real window id.
+// The Dock keeps an empty `mc` group. Space tiles (Desktop 1, a full-screen
+// app, the add button) live under `mc.spaces` and are not windows.
+let closeOverviewEnabled: Bool = UserDefaults.standard.object(forKey: "middleClickCloseOverview") == nil
+    ? true
+    : UserDefaults.standard.bool(forKey: "middleClickCloseOverview")
+let removeCalendarEventEnabled: Bool = UserDefaults.standard.object(forKey: "middleClickRemoveCalendarEvent") == nil
+    ? true
+    : UserDefaults.standard.bool(forKey: "middleClickRemoveCalendarEvent")
+
+// Carbon `kVK_Delete` — the Mac delete/backspace key Calendar uses to remove events.
+private let deleteKeyCode: CGKeyCode = 0x33
+
+enum OverviewKind {
+    case missionControl
+    case appExpose
+
+    var logName: String {
+        switch self {
+        case .missionControl: return "Mission Control"
+        case .appExpose: return "App Exposé"
+        }
+    }
+}
+
+struct OverviewThumbnail {
+    let title: String
+    let windowID: CGWindowID?
+    let frame: CGRect
+    let kind: OverviewKind
+}
+
+struct OverviewWindow {
+    let element: AXUIElement
+    let app: NSRunningApplication
+    let title: String
+    let frame: CGRect
+    let windowID: CGWindowID?
+}
+
+private struct OverviewHostPIDs {
+    var windowManager: pid_t = 0
+    var dock: pid_t = 0
+}
+
+private struct OverviewScan {
+    var populated = false
+    var kind: OverviewKind?
+    var match: OverviewThumbnail?
+}
+
+private let overviewHostLock = NSLock()
+private var overviewHosts = OverviewHostPIDs()
+// While the overview is closed, skip the Dock tree briefly. Copying it on
+// every browser-tab click can stall the event tap long enough for macOS to
+// disable it.
+private var overviewDockClosedUntil: TimeInterval = 0
+
+/// `_AXUIElementGetWindow` is private but stable; Rectangle and AltTab use it.
+/// Resolved at runtime so a missing symbol only loses id matching.
+private typealias AXGetWindowFunction = @convention(c) (AXUIElement, UnsafeMutablePointer<CGWindowID>) -> AXError
+
+private let axGetWindow: AXGetWindowFunction? = {
+    guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "_AXUIElementGetWindow") else {
+        return nil
+    }
+    return unsafeBitCast(symbol, to: AXGetWindowFunction.self)
+}()
+
+func refreshOverviewHosts() {
+    func pid(_ bundleID: String) -> pid_t {
+        NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first?.processIdentifier ?? 0
+    }
+    let hosts = OverviewHostPIDs(
+        windowManager: pid("com.apple.WindowManager"),
+        dock: pid("com.apple.dock")
+    )
+    overviewHostLock.lock()
+    overviewHosts = hosts
+    overviewHostLock.unlock()
+}
+
+private func axString(_ element: AXUIElement, _ attribute: String) -> String? {
+    axAttribute(element, attribute) as? String
+}
+
+private func axChildren(_ element: AXUIElement) -> [AXUIElement] {
+    guard let raw = axAttribute(element, kAXChildrenAttribute) else { return [] }
+    if let values = raw as? [AXUIElement] { return values }
+    guard CFGetTypeID(raw) == CFArrayGetTypeID(), let objects = raw as? [AnyObject] else { return [] }
+    return objects.compactMap { value in
+        guard CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        return (value as! AXUIElement)
+    }
+}
+
+private func axFrame(_ element: AXUIElement) -> CGRect? {
+    if let raw = axAttribute(element, "AXFrame"), CFGetTypeID(raw) == AXValueGetTypeID() {
+        var rect = CGRect.zero
+        if AXValueGetValue(raw as! AXValue, .cgRect, &rect), rect.width > 0, rect.height > 0 {
+            return rect
+        }
+    }
+    guard let positionValue = axAttribute(element, kAXPositionAttribute),
+          let sizeValue = axAttribute(element, kAXSizeAttribute),
+          CFGetTypeID(positionValue) == AXValueGetTypeID(),
+          CFGetTypeID(sizeValue) == AXValueGetTypeID() else { return nil }
+    var position = CGPoint.zero
+    var size = CGSize.zero
+    guard AXValueGetValue(positionValue as! AXValue, .cgPoint, &position),
+          AXValueGetValue(sizeValue as! AXValue, .cgSize, &size),
+          size.width > 0, size.height > 0 else { return nil }
+    return CGRect(origin: position, size: size)
+}
+
+private func axUInt32(_ element: AXUIElement, _ attribute: String) -> UInt32? {
+    guard let number = axAttribute(element, attribute) as? NSNumber else { return nil }
+    let value = number.uint32Value
+    return value == 0 ? nil : value
+}
+
+private func cgWindowID(of element: AXUIElement) -> CGWindowID? {
+    guard let axGetWindow else { return nil }
+    var id: CGWindowID = 0
+    guard axGetWindow(element, &id) == .success, id != 0 else { return nil }
+    return id
+}
+
+private func prepareAX(_ element: AXUIElement, timeout: Float = 0.05) -> AXUIElement {
+    AXUIElementSetMessagingTimeout(element, timeout)
+    return element
+}
+
+/// The window under `point`, or nil when no overview is up or the pointer is
+/// on a space tile / the wallpaper gap. Safe to call from the event-tap thread:
+/// it only reads the cached host pids and the accessibility tree.
+func overviewThumbnail(containing point: CGPoint) -> OverviewThumbnail? {
+    guard closeOverviewEnabled else { return nil }
+    let now = ProcessInfo.processInfo.systemUptime
+    overviewHostLock.lock()
+    let hosts = overviewHosts
+    let dockClosedUntil = overviewDockClosedUntil
+    overviewHostLock.unlock()
+
+    // macOS 27 publishes the live tree here. A quiet WindowManager has no
+    // `mc.display`, so this stays cheap while the overview is closed.
+    if hosts.windowManager > 0 {
+        var scan = OverviewScan()
+        scanOverviewHost(hosts.windowManager, point: point, scan: &scan)
+        if let match = scan.match { return match }
+        if scan.populated { return nil }
+    }
+
+    if now < dockClosedUntil || hosts.dock <= 0 { return nil }
+    var scan = OverviewScan()
+    scanOverviewHost(hosts.dock, point: point, scan: &scan)
+    if !scan.populated {
+        overviewHostLock.lock()
+        overviewDockClosedUntil = now + 0.2
+        overviewHostLock.unlock()
+    }
+    return scan.match
+}
+
+private func scanOverviewHost(_ pid: pid_t, point: CGPoint, scan: inout OverviewScan) {
+    let root = prepareAX(AXUIElementCreateApplication(pid), timeout: 0.08)
+    for child in axChildren(root) {
+        switch axString(child, kAXIdentifierAttribute) ?? "" {
+        case "mc":
+            scanOverviewContainer(child, kind: .missionControl, point: point, scan: &scan)
+        case "mc.display":
+            scanOverviewDisplay(child, kind: .missionControl, point: point, scan: &scan)
+        case "appexpose":
+            scanOverviewContainer(child, kind: .appExpose, point: point, scan: &scan)
+        case "appexpose.display":
+            scanOverviewDisplay(child, kind: .appExpose, point: point, scan: &scan)
+        default:
+            break
+        }
+    }
+}
+
+private func scanOverviewContainer(_ container: AXUIElement, kind: OverviewKind, point: CGPoint, scan: inout OverviewScan) {
+    _ = prepareAX(container)
+    for child in axChildren(container) {
+        switch axString(child, kAXIdentifierAttribute) ?? "" {
+        case "mc.display", "appexpose.display":
+            scanOverviewDisplay(child, kind: kind, point: point, scan: &scan)
+        case "mc.windows", "appexpose.windows":
+            noteOverviewButtons(axChildren(child), kind: kind, point: point, scan: &scan)
+        default:
+            break
+        }
+    }
+}
+
+private func scanOverviewDisplay(_ display: AXUIElement, kind: OverviewKind, point: CGPoint, scan: inout OverviewScan) {
+    _ = prepareAX(display)
+    for child in axChildren(display) {
+        let identifier = axString(child, kAXIdentifierAttribute) ?? ""
+        // Desktop tiles and the "+" button are spaces, not windows.
+        if identifier == "mc.spaces" || identifier.hasPrefix("mc.spaces") { continue }
+        if identifier == "mc.windows" || identifier == "appexpose.windows" {
+            noteOverviewButtons(axChildren(child), kind: kind, point: point, scan: &scan)
+            continue
+        }
+        if axString(child, kAXRoleAttribute) == "AXButton" {
+            noteOverviewButtons([child], kind: kind, point: point, scan: &scan)
+        }
+    }
+}
+
+private func axActions(_ element: AXUIElement) -> [String] {
+    var names: CFArray?
+    guard AXUIElementCopyActionNames(element, &names) == .success else { return [] }
+    return names as? [String] ?? []
+}
+
+private func noteOverviewButtons(_ buttons: [AXUIElement], kind: OverviewKind, point: CGPoint, scan: inout OverviewScan) {
+    for button in buttons {
+        _ = prepareAX(button)
+        let identifier = axString(button, kAXIdentifierAttribute) ?? ""
+        if identifier == "mc.spaces.add" || identifier.hasPrefix("mc.spaces") { continue }
+        if let role = axString(button, kAXRoleAttribute), role != "AXButton" { continue }
+        guard let frame = axFrame(button), frame.width >= 24, frame.height >= 24 else { continue }
+        let title = axString(button, kAXTitleAttribute) ?? ""
+        let windowID = axUInt32(button, "wid")
+        if title.isEmpty && windowID == nil { continue }
+        scan.populated = true
+        if scan.kind == nil { scan.kind = kind }
+        guard frame.insetBy(dx: -2, dy: -2).contains(point) else { continue }
+        let candidate = OverviewThumbnail(title: title, windowID: windowID, frame: frame, kind: kind)
+        if let current = scan.match {
+            // A window id beats a title-only sibling (a nested control has no wid).
+            // Otherwise the smaller frame is the control the pointer is actually on.
+            if current.windowID != nil && candidate.windowID == nil { continue }
+            if current.windowID == nil && candidate.windowID != nil {
+                scan.match = candidate
+                continue
+            }
+            let area = frame.width * frame.height
+            if current.frame.width * current.frame.height <= area { continue }
+        }
+        scan.match = candidate
+    }
+}
+
+func consumeMiddleClick(at point: CGPoint) -> Bool {
+    if let item = dockItem(at: point) {
+        DispatchQueue.main.async { registerDockMiddleClick(item) }
+        return true
+    }
+    if let thumb = overviewThumbnail(containing: point) {
+        DispatchQueue.main.async { closeOverviewWindow(thumb) }
+        return true
+    }
+    if removeCalendarEventEnabled, let event = calendarEvent(at: point) {
+        DispatchQueue.main.async { removeCalendarEvent(event) }
+        return true
+    }
+    return false
+}
+
+// MARK: - Calendar events
+
+// Tag synthetic clicks so our own event tap never rewrites them.
+private let syntheticEventTag: Int64 = 0x55585446
+
+struct CalendarEventHit {
+    let element: AXUIElement
+    let label: String
+    let pid: pid_t
+    let point: CGPoint
+}
+
+private func axParent(_ element: AXUIElement) -> AXUIElement? {
+    guard let raw = axAttribute(element, kAXParentAttribute) else { return nil }
+    guard CFGetTypeID(raw) == AXUIElementGetTypeID() else { return nil }
+    return (raw as! AXUIElement)
+}
+
+/// Week/day events are `AXStaticText` with Press + ShowMenu under a
+/// `day-column-*` list. Mini-month day cells only expose `AXOpen`.
+private func isCalendarEventElement(_ element: AXUIElement) -> Bool {
+    guard axString(element, kAXRoleAttribute) == "AXStaticText" else { return false }
+    let actions = axActions(element)
+    guard actions.contains(kAXPressAction as String),
+          actions.contains(kAXShowMenuAction as String) else { return false }
+    if let parent = axParent(element) {
+        let parentID = axString(parent, kAXIdentifierAttribute) ?? ""
+        if parentID.hasPrefix("day-column-") { return true }
+    }
+    let desc = axString(element, kAXDescriptionAttribute) ?? ""
+    return desc.localizedCaseInsensitiveContains("Starts on")
+        || desc.localizedCaseInsensitiveContains("All-Day")
+        || desc.localizedCaseInsensitiveContains("All Day")
+}
+
+func calendarEvent(at point: CGPoint) -> CalendarEventHit? {
+    guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.iCal").first else {
+        return nil
+    }
+    let sys = AXUIElementCreateSystemWide()
+    AXUIElementSetMessagingTimeout(sys, 0.1)
+    var el: AXUIElement?
+    guard AXUIElementCopyElementAtPosition(sys, Float(point.x), Float(point.y), &el) == .success,
+          let start = el else { return nil }
+
+    var pid: pid_t = 0
+    guard AXUIElementGetPid(start, &pid) == .success, pid == app.processIdentifier else {
+        return nil
+    }
+
+    var current: AXUIElement? = start
+    for _ in 0..<6 {
+        guard let node = current else { break }
+        AXUIElementSetMessagingTimeout(node, 0.1)
+        if isCalendarEventElement(node) {
+            let label = axString(node, kAXDescriptionAttribute)
+                ?? axString(node, kAXTitleAttribute)
+                ?? "event"
+            return CalendarEventHit(element: node, label: label, pid: pid, point: point)
+        }
+        let id = axString(node, kAXIdentifierAttribute) ?? ""
+        // Landed on the empty day column / chrome, not an event.
+        if id.hasPrefix("day-column-") || id == "week-container" || id == "canvasFrame" || id == "CALMainWindow" {
+            return nil
+        }
+        current = axParent(node)
+    }
+    return nil
+}
+
+private func postLeftClick(at point: CGPoint) {
+    let source = CGEventSource(stateID: .hidSystemState)
+    for type: CGEventType in [.leftMouseDown, .leftMouseUp] {
+        guard let event = CGEvent(
+            mouseEventSource: source,
+            mouseType: type,
+            mouseCursorPosition: point,
+            mouseButton: .left
+        ) else { continue }
+        event.setIntegerValueField(.eventSourceUserData, value: syntheticEventTag)
+        event.post(tap: .cghidEventTap)
+    }
+}
+
+private func calendarHasModalSheet(pid: pid_t) -> Bool {
+    let axApp = prepareAX(AXUIElementCreateApplication(pid), timeout: 0.2)
+    let windows = axAttribute(axApp, kAXWindowsAttribute) as? [AXUIElement] ?? []
+    for window in windows {
+        if let sheets = axAttribute(window, "AXSheets") as? [AXUIElement], !sheets.isEmpty {
+            return true
+        }
+        let subrole = axString(window, kAXSubroleAttribute)
+        if subrole == "AXSystemDialog" { return true }
+    }
+    return false
+}
+
+func removeCalendarEvent(_ hit: CalendarEventHit) {
+    let short = hit.label.count > 60 ? String(hit.label.prefix(57)) + "…" : hit.label
+    print("[UXTapFix] Removing Calendar event '\(short)'")
+    guard let app = NSRunningApplication(processIdentifier: hit.pid) else { return }
+
+    let wasFrontmost = NSWorkspace.shared.frontmostApplication?.processIdentifier == hit.pid
+    if !wasFrontmost {
+        _ = activateApp(app, from: NSWorkspace.shared.frontmostApplication)
+    }
+
+    // A real left-click selects the event and focuses Calendar's grid in one
+    // step; AXPress alone can leave first-responder focus behind on the first
+    // click, forcing a second click to actually delete.
+    let clickDelay: TimeInterval = wasFrontmost ? 0.0 : 0.08
+    DispatchQueue.main.asyncAfter(deadline: .now() + clickDelay) {
+        postLeftClick(at: hit.point)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            guard axElementIsValid(hit.element) else { return }
+            postKey(virtualKey: deleteKeyCode, to: hit.pid)
+            // A recurring event opens its confirmation sheet asynchronously.
+            // Give it time to appear; never send another Delete into that sheet.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                guard axElementIsValid(hit.element), !calendarHasModalSheet(pid: hit.pid) else { return }
+                _ = prepareAX(hit.element, timeout: 0.25)
+                _ = AXUIElementPerformAction(hit.element, kAXPressAction as CFString)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    guard axElementIsValid(hit.element), !calendarHasModalSheet(pid: hit.pid) else { return }
+                    postKey(virtualKey: deleteKeyCode, to: hit.pid)
+                }
+            }
+        }
+    }
+}
+
+private func collapsedTitle(_ title: String) -> String {
+    var text = title.trimmingCharacters(in: .whitespacesAndNewlines)
+    while text.hasSuffix("…") || text.hasSuffix("...") {
+        if text.hasSuffix("…") {
+            text.removeLast()
+        } else if text.count >= 3 {
+            text.removeLast(3)
+        } else {
+            break
+        }
+        text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    return text
+}
+
+/// Lower is better. nil means the titles are not the same window.
+private func titleMatchScore(_ thumbnail: String, _ window: String, appName: String) -> Double? {
+    let thumb = collapsedTitle(thumbnail)
+    let win = collapsedTitle(window)
+    if !win.isEmpty && thumb == win { return 0 }
+    if thumb.count >= 8 && !win.isEmpty && win.hasPrefix(thumb) { return 0.35 }
+    if win.count >= 8 && !thumb.isEmpty && thumb.hasPrefix(win) { return 0.45 }
+    if thumb.count >= 8 && win.count >= 8 && (win.contains(thumb) || thumb.contains(win)) { return 0.75 }
+    let app = collapsedTitle(appName)
+    if !app.isEmpty && thumb == app && win.isEmpty { return 0.4 }
+    if !app.isEmpty && thumb == app { return 1.15 }
+    return nil
+}
+
+private func isOverviewProcess(_ app: NSRunningApplication) -> Bool {
+    switch app.bundleIdentifier {
+    case "com.apple.dock", "com.apple.WindowManager", "com.apple.exposelauncher":
+        return true
+    default:
+        return false
+    }
+}
+
+private func windows(of app: NSRunningApplication) -> [OverviewWindow] {
+    let axApp = prepareAX(AXUIElementCreateApplication(app.processIdentifier), timeout: 0.25)
+    guard let elements = axAttribute(axApp, kAXWindowsAttribute) as? [AXUIElement] else { return [] }
+    var result: [OverviewWindow] = []
+    for element in elements {
+        guard axString(element, kAXRoleAttribute) == "AXWindow" else { continue }
+        guard let frame = axFrame(element), frame.width >= 20, frame.height >= 20 else { continue }
+        result.append(OverviewWindow(
+            element: element,
+            app: app,
+            title: axString(element, kAXTitleAttribute) ?? "",
+            frame: frame,
+            windowID: cgWindowID(of: element)
+        ))
+    }
+    return result
+}
+
+private func windowOwner(of windowID: CGWindowID) -> pid_t? {
+    guard let info = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] else {
+        return nil
+    }
+    for item in info {
+        guard let number = item[kCGWindowNumber as String] as? NSNumber,
+              number.uint32Value == windowID,
+              let pid = item[kCGWindowOwnerPID as String] as? NSNumber else { continue }
+        let value = pid.int32Value
+        return value > 0 ? value : nil
+    }
+    return nil
+}
+
+private func bestTitleMatch(_ thumb: OverviewThumbnail, among windows: [OverviewWindow]) -> OverviewWindow? {
+    let aspect = thumb.frame.width / max(thumb.frame.height, 1)
+    var ranked: [(score: Double, window: OverviewWindow)] = []
+    for window in windows {
+        guard var score = titleMatchScore(thumb.title, window.title, appName: window.app.localizedName ?? "") else {
+            continue
+        }
+        let windowAspect = window.frame.width / max(window.frame.height, 1)
+        score += abs(aspect - windowAspect) / max(aspect, windowAspect)
+        ranked.append((score, window))
+    }
+    ranked.sort { $0.score < $1.score }
+    guard let best = ranked.first, best.score <= 1.35 else { return nil }
+    if ranked.count > 1, ranked[1].score - best.score < 0.12 {
+        print("[UXTapFix] Overview thumbnail '\(thumb.title)' matches more than one window; left them open")
+        return nil
+    }
+    return best.window
+}
+
+private func matchedWindow(for thumb: OverviewThumbnail) -> OverviewWindow? {
+    if let windowID = thumb.windowID, let pid = windowOwner(of: windowID),
+       let app = NSRunningApplication(processIdentifier: pid), !isOverviewProcess(app) {
+        let owned = windows(of: app)
+        if let exact = owned.first(where: { $0.windowID == windowID }) { return exact }
+        // The id named the app, but the window itself did not expose one.
+        // Stay inside that app so a similar title elsewhere cannot be closed.
+        return bestTitleMatch(thumb, among: owned)
+    }
+
+    let apps = NSWorkspace.shared.runningApplications.filter {
+        $0.activationPolicy == .regular && $0.processIdentifier != getpid() && !isOverviewProcess($0)
+    }
+    return bestTitleMatch(thumb, among: apps.flatMap(windows(of:)))
+}
+
+private func axElementIsValid(_ element: AXUIElement) -> Bool {
+    var value: AnyObject?
+    return AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &value) == .success
+}
+
+private func pressCloseButton(_ window: AXUIElement) -> Bool {
+    guard let raw = axAttribute(window, kAXCloseButtonAttribute),
+          CFGetTypeID(raw) == AXUIElementGetTypeID() else { return false }
+    let button = prepareAX(raw as! AXUIElement, timeout: 0.3)
+    if let enabled = axAttribute(button, kAXEnabledAttribute) as? NSNumber, !enabled.boolValue {
+        return false
+    }
+    return AXUIElementPerformAction(button, kAXPressAction as CFString) == .success
+}
+
+private func windowNeedsAttention(_ window: AXUIElement, app: NSRunningApplication) -> Bool {
+    if let children = axAttribute(window, kAXChildrenAttribute) as? [AXUIElement],
+       children.contains(where: { axString($0, kAXRoleAttribute) == "AXSheet" }) {
+        return true
+    }
+    let axApp = prepareAX(AXUIElementCreateApplication(app.processIdentifier), timeout: 0.25)
+    let windows = axAttribute(axApp, kAXWindowsAttribute) as? [AXUIElement] ?? []
+    return windows.contains { candidate in
+        let subrole = axString(candidate, kAXSubroleAttribute)
+        return subrole == "AXDialog" || subrole == "AXSystemDialog"
+    }
+}
+
+private func postKey(virtualKey: CGKeyCode, flags: CGEventFlags = [], to pid: pid_t? = nil) {
+    let source = CGEventSource(stateID: .hidSystemState)
+    for down in [true, false] {
+        guard let event = CGEvent(keyboardEventSource: source, virtualKey: virtualKey, keyDown: down) else { continue }
+        event.flags = flags
+        if let pid {
+            event.postToPid(pid)
+        } else {
+            event.post(tap: .cghidEventTap)
+        }
+    }
+}
+
+@discardableResult
+private func activateApp(_ app: NSRunningApplication, from other: NSRunningApplication?) -> Bool {
+    if #available(macOS 14.0, *), let other {
+        return app.activate(from: other, options: [])
+    }
+    return app.activate(options: [])
+}
+
+/// True when that overview is still showing window thumbnails. An empty `mc`
+/// group on the Dock (macOS 27) does not count.
+private func overviewIsOpen(_ kind: OverviewKind) -> Bool {
+    overviewHostLock.lock()
+    let hosts = overviewHosts
+    overviewHostLock.unlock()
+    let offscreen = CGPoint(x: -10000, y: -10000)
+    for pid in [hosts.windowManager, hosts.dock] where pid > 0 {
+        var scan = OverviewScan()
+        scanOverviewHost(pid, point: offscreen, scan: &scan)
+        if scan.populated && scan.kind == kind { return true }
+    }
+    return false
+}
+
+private func leaveOverview(_ kind: OverviewKind) {
+    // Closing may already have dismissed the overview. Toggling Mission
+    // Control then would open it on top of the save sheet, and Escape would
+    // cancel the sheet.
+    guard overviewIsOpen(kind) else { return }
+    switch kind {
+    case .missionControl:
+        // Toggling the app dismisses the overview without sending Escape, so a
+        // save sheet is not cancelled.
+        NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Mission Control.app"))
+    case .appExpose:
+        postKey(virtualKey: 53)
+    }
+}
+
+private func closeWithCommandW(_ window: OverviewWindow, kind: OverviewKind) {
+    guard axElementIsValid(window.element) else { return }
+    let previous = NSWorkspace.shared.frontmostApplication
+    let appElement = prepareAX(AXUIElementCreateApplication(window.app.processIdentifier), timeout: 0.4)
+    AXUIElementSetAttributeValue(window.element, kAXMainAttribute as CFString, kCFBooleanTrue)
+    AXUIElementSetAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, window.element)
+    AXUIElementPerformAction(window.element, kAXRaiseAction as CFString)
+    _ = activateApp(window.app, from: previous)
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+        guard let focused = axAttribute(appElement, kAXFocusedWindowAttribute),
+              CFGetTypeID(focused) == AXUIElementGetTypeID(),
+              CFEqual(focused as CFTypeRef, window.element) else {
+            print("[UXTapFix] Could not focus '\(window.title)'; left it open")
+            if let previous, previous.processIdentifier != window.app.processIdentifier {
+                _ = activateApp(previous, from: window.app)
+            }
+            return
+        }
+        postKey(virtualKey: 13, flags: .maskCommand, to: window.app.processIdentifier)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            if !axElementIsValid(window.element) {
+                if let previous, previous.processIdentifier != window.app.processIdentifier {
+                    _ = activateApp(previous, from: window.app)
+                }
+                return
+            }
+            if windowNeedsAttention(window.element, app: window.app) {
+                print("[UXTapFix] Save prompt open for '\(window.title)'; leaving \(kind.logName)")
+                leaveOverview(kind)
+                return
+            }
+            if let previous, previous.processIdentifier != window.app.processIdentifier {
+                _ = activateApp(previous, from: window.app)
+            }
+            print("[UXTapFix] '\(window.title)' stayed open")
+        }
+    }
+}
+
+func closeOverviewWindow(_ thumb: OverviewThumbnail) {
+    guard let window = matchedWindow(for: thumb) else {
+        let id = thumb.windowID.map(String.init) ?? "none"
+        print("[UXTapFix] No window matched the \(thumb.kind.logName) thumbnail '\(thumb.title)' (wid \(id))")
+        return
+    }
+    let label = window.title.isEmpty ? (window.app.localizedName ?? thumb.title) : window.title
+    print("[UXTapFix] Closing '\(label)' from \(thumb.kind.logName)")
+
+    guard pressCloseButton(window.element) else {
+        closeWithCommandW(window, kind: thumb.kind)
+        return
+    }
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+        if !axElementIsValid(window.element) { return }
+        if windowNeedsAttention(window.element, app: window.app) {
+            print("[UXTapFix] Save prompt open for '\(label)'; leaving \(thumb.kind.logName)")
+            leaveOverview(thumb.kind)
+            return
+        }
+        print("[UXTapFix] Close button did not dismiss '\(label)'; trying ⌘W")
+        closeWithCommandW(window, kind: thumb.kind)
+    }
+}
+
 // MARK: - Event handling (shared)
 
 // One middle-click quits; three force-quit. A second click is only part of
@@ -1081,15 +1740,20 @@ func commitPendingDockClick() {
 var eventTap: CFMachPort?
 var globalMonitor: Any?
 let middleButton: Int64 = 2
-// True while a middle-button down over the Dock was swallowed; its matching up
-// must be swallowed too so the Dock does not see a half-click.
-var swallowedDockMiddleDown = false
+// True while a middle-button down over the Dock or an overview thumbnail was
+// swallowed; its matching up must be swallowed too so the target does not see
+// a half-click.
+var swallowedMiddleDown = false
 
 func tapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent, refcon: UnsafeMutableRawPointer?) -> Unmanaged<CGEvent>? {
     if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
         // An up that never arrived must not be swallowed on the next click.
-        swallowedDockMiddleDown = false
+        swallowedMiddleDown = false
         if let t = eventTap { CGEvent.tapEnable(tap: t, enable: true) }
+        return Unmanaged.passUnretained(event)
+    }
+
+    if event.getIntegerValueField(.eventSourceUserData) == syntheticEventTag {
         return Unmanaged.passUnretained(event)
     }
 
@@ -1112,21 +1776,16 @@ func tapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent, refc
 
     if event.type == .otherMouseDown {
         // A down before the previous up means the up was missed.
-        swallowedDockMiddleDown = false
+        swallowedMiddleDown = false
         let btn = event.getIntegerValueField(.mouseEventButtonNumber)
-        if btn == middleButton {
-            let loc = event.location
-            if let item = dockItem(at: loc) {
-                swallowedDockMiddleDown = true
-                DispatchQueue.main.async { registerDockMiddleClick(item) }
-                return nil // swallow
-            }
-            swallowedDockMiddleDown = false
+        if btn == middleButton, consumeMiddleClick(at: event.location) {
+            swallowedMiddleDown = true
+            return nil // swallow
         }
     } else if event.type == .otherMouseUp {
         let btn = event.getIntegerValueField(.mouseEventButtonNumber)
-        if btn == middleButton && swallowedDockMiddleDown {
-            swallowedDockMiddleDown = false
+        if btn == middleButton && swallowedMiddleDown {
+            swallowedMiddleDown = false
             return nil // swallow the up that belongs to the swallowed down
         }
     }
@@ -1156,11 +1815,11 @@ func tryInstallEventTap(logFailure: Bool = true) -> Bool {
         return false
     }
     eventTap = tap
-    swallowedDockMiddleDown = false
+    swallowedMiddleDown = false
     let src = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
     CFRunLoopAddSource(CFRunLoopGetCurrent(), src, .commonModes)
     CGEvent.tapEnable(tap: tap, enable: true)
-    print("[UXTapFix] CGEventTap installed ✓ (will swallow middle-click on Dock)")
+    print("[UXTapFix] CGEventTap installed ✓ (will swallow middle-click on the Dock and in Mission Control)")
     return true
 }
 
@@ -1196,8 +1855,8 @@ func installGlobalMonitor() {
         // Use the event's CG location (top-left origin), not NSEvent.mouseLocation
         // (bottom-left), so the AX hit test looks at the actual Dock item.
         let pt = e.cgEvent?.location ?? CGEvent(source: nil)?.location
-        guard let pt, let item = dockItem(at: pt) else { return }
-        DispatchQueue.main.async { registerDockMiddleClick(item) }
+        guard let pt else { return }
+        _ = consumeMiddleClick(at: pt)
     }
     print("[UXTapFix] NSEvent global monitor installed ✓ (passive)")
 }
@@ -1227,7 +1886,7 @@ if !tapOK {
 let middleClickOK = MiddleClickEmulator.shared.start()
 if MiddleClickEmulator.shared.enabled {
     if middleClickOK {
-        print("[UXTapFix] Three-finger tap/click sends a middle click. Middle-click a browser tab to close it.")
+        print("[UXTapFix] Three-finger tap/click sends a middle click. Middle-click a browser tab, a window in Mission Control, or a Calendar event, to close or delete it.")
     } else {
         print("[UXTapFix] Trackpad support unavailable; middle-click still works with a mouse or another gesture app.")
     }
@@ -1238,7 +1897,13 @@ if !NSRunningApplication.runningApplications(withBundleIdentifier: "art.ginzburg
 }
 
 startStatusHeartbeat()
-print("[UXTapFix] Ready. Three-finger tap/click a Dock icon to quit; middle-click a browser tab to close it. PID \(getpid())")
+if !closeOverviewEnabled {
+    print("[UXTapFix] Mission Control window close disabled by preference.")
+}
+if !removeCalendarEventEnabled {
+    print("[UXTapFix] Calendar event removal disabled by preference.")
+}
+print("[UXTapFix] Ready. Three-finger tap/click a Dock icon to quit, a browser tab to close it, a Mission Control window to close it, or a Calendar event to delete it. PID \(getpid())")
 print("[UXTapFix] Log: \(logFileURL.path)")
 
 signal(SIGTERM, SIG_IGN)
